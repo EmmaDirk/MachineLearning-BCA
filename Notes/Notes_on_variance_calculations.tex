@@ -12,19 +12,25 @@ The mathematical derivations showing how we can set achieve the following in our
     \item Each variable has a mean 0.
     \item The autoregressive effects of $X_{t-1}$ on $X_t$ is 0.25 (same for $Y_{t-1}$ on $Y_t$).
     \item The lag-1 cross effect of $X_{t-1}$ on $Y_t$ is 0.10 (same for $Y_{t-1}$ on $X_t$).
-    \item There are 3 confounders, and hence k=3.
+    \item There are 3 confounders, and hence $k=3$.
     \item Their effects differ for X and Y, such that X is affected at [0.30, 0.20, 0.10] and Y is affected at [0.30, 0.20, 0.10].
     \item The innovations have residual correlations of 0.3 at each time-point, but not across time-points.
+    \item At the first time-point ($T=0$), X and Y are correlated due to the confounding variables. 
+    \item At the first time-point, we can assume that the dynamic process was going on before the data started being collected. Hence 
+    we want to simulate a system that is already stationary, but also where the first time-point has some 'extra' correlation of X and Y
+    due to the fact that we assume the process was going before the start of the data collection.
 \end{itemize}
 
 \subsection*{Defining matrices}
 
+\noindent
 We have variables $X$ over occasions $T$ and $Y$ over occasions $T$. This yields the vector:
 
 \[
 Z_t = \begin{bmatrix} X_t \\ Y_t \end{bmatrix}
 \]
 
+\noindent
 For one individual \textit{i}, the vector looks like:
 
 \[
@@ -43,6 +49,7 @@ Y_{i5}
 \end{bmatrix}.
 \]
 
+\noindent
 Expanding for $N$ individuals:
 
 \[
@@ -55,13 +62,23 @@ X_{N,1} & Y_{N,1} & X_{N,2} & Y_{N,2} & X_{N,3} & Y_{N,3} & X_{N,4} & Y_{N,4} & 
 \end{bmatrix}.
 \]
 
-Now for time-point $t$, $X_t$ and $Y_t$ are made up of some part of the confounder effect, some part innovations (unexplained variances), 
-and if $t>0$, some part of the dynamic process, i.e.\ the lagged and autoregressive effects. We can capture this in the formula:
+\noindent
+Now for time-point $t$, $X_t$ and $Y_t$ are made up of some part of the confounder effect, and some part by the dynamic efects. With
+the dynamic effects here we mean every effect that 'feeds forward' to the next time-point. For the first time-point, there are no dynamic
+effects at all, since there are no previous time-points
+
+. Another way of phrasing this is that some part
+of the variance in X (or Y) is explained by the confounders, some par
+
+We can capture this in the formula:
 
 \[
 Z_t = A Z_{t-1} + B U + E_t,
 \]
+
+\noindent
 where
+
 \begin{itemize}
     \item $A$ is the matrix of autoregressive and cross-lagged effects,
     \item $B$ is the matrix of confounder effects,
@@ -69,19 +86,23 @@ where
     \item $E_t$ is the vector of innovations at time-point $t$.
 \end{itemize}
 
+\noindent
 If we choose our effects as denoted above we get the following $A$ matrix:
 
 \[
-A = \begin{bmatrix} a_x & b_y \\ b_x & a_y \end{bmatrix} = \\begin{bmatrix} 0.25 & 0.10 \\ 0.10 & 0.25 \end{bmatrix}
+A = \begin{bmatrix} a_x & b_y \\ b_x & a_y \end{bmatrix} = \begin{bmatrix} 0.25 & 0.10 \\ 0.10 & 0.25 \end{bmatrix}
 \]
 
+\noindent
 We get the following beta matrix:
 
 \[
-B = \begin{bmatrix} c_{x1} & c_{x2} & c_{x3} \\ c_{y1} & c_{y2} & c_{y3} \end{bmatrix} = \\begin{bmatrix} 0.30 & 0.20 & 0.10 \\ 0.30 & 0.20 & 0.10 \end{bmatrix}
+B = \begin{bmatrix} c_{x1} & c_{x2} & c_{x3} \\ c_{y1} & c_{y2} & c_{y3} \end{bmatrix} = \begin{bmatrix} 0.30 & 0.20 & 0.10 \\ 0.30 & 0.20 & 0.10 \end{bmatrix}
 \]
 
+\noindent
 And matrix U:
+
 \[
 U =
 \begin{bmatrix}
@@ -90,10 +111,33 @@ c_{2,1} & c_{2,2} & c_{2,3} \\
 c_{3,1} & c_{3,2} & c_{3,3} \\
 \vdots  & \vdots  & \vdots  \\
 c_{N,1} & c_{N,2} & c_{N,3}
-\end{bmatrix}.
+\end{bmatrix}
 \]
 
-Since the innovations matrix needs to be specified based on the other matrixes, we need to calculate the values that go into it.
+\noindent
+Since the innovations matrix needs to be specified based on the other matrixes, we need to calculate the values that go into it to make 
+the variances of each variable 1. 
+
+\subsection*{Calculating variances}
+
+\noindent
+As we just denoted, each measurement occasion takes some variance from the confounders and some from the dynamic effect. The variance received from
+the confounders is time-invariant, which means we can calculate it directly. Since the variances of all variables (and thus also the confounders) is 1,
+and the confoudners are not correlated with each other, their covariance matrix is the identity matrix $I$. Hence, the variance received from the confounders is:
+
+\[S_U = B \Psi B^T = B I B^T = B B^T\]
+
+\noindent
+If we use the values from above, we get: 
+
+\[S_U = \begin{bmatrix} 0.30 & 0.20 & 0.10 \\ 0.30 & 0.20 & 0.10 \end{bmatrix} \begin{bmatrix} 0.30 & 0.30 \\ 0.20 & 0.20 \\ 0.10 & 0.10 \end{bmatrix} = \begin{bmatrix} 0.14 & 0.14 \\ 0.14 & 0.14 \end{bmatrix}\]
+
+\noindent
+The confounders add a variance of 0.14 to both X and Y, and a covariance of 0.14 between X and Y at each time-point. We wanted each variable to have a variance of 1, 
+which means that the dynamic effect still needs to add 1-0.14 = 0.86 to the variance of each variable.
+
+
+
 
 \end{document}
 
