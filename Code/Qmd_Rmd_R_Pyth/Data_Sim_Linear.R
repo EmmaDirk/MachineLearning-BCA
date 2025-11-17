@@ -3,6 +3,7 @@
 # X and Y are both affected by a number of confounding variables C, which have stable effects
 # over time as they represent time-invariant confounding variables, such as IQ. 
 # The data simulation model will have the following properties:
+
 # 1. Each variable will have an innovation (or unexplained variance) such that the total variance of each variable is 1.
 # 2. Each variable will have a mean of 0. 
 # 3. The autoregressive effects will be set to 0.25 for both X and Y.
@@ -23,11 +24,11 @@ library(tidyverse)
 N <- 100000                                                # number of people
 T <- 5                                                     # number of time points
 
-ax <- 0.30                                                 # effect of X_(t-1) on X_t
-ay <- 0.30                                                 # effect of Y_(t-1) on Y_t
+ax <- 0.25                                                 # effect of X_(t-1) on X_t
+ay <- 0.25                                                 # effect of Y_(t-1) on Y_t
 bx <- 0.10                                                 # effect of Y_(t-1) on X_t
 by <- 0.10                                                 # effect of X_(t-1) on Y_t
-
+                                                          
 # create the path matrix A from these effects
 A <- matrix(c(ax, by, bx, ay), nrow=2, byrow=TRUE)
 
@@ -149,11 +150,17 @@ round(sigma, 3)
 # check descriptives
 describe(df)
 
-# create scatterplots with a trendline
-ggplot(df, aes(x = x1, y = c1)) +
-  geom_point() +
-  geom_smooth(method = "lm")
+# create a sample dataframe for plotting residuals 
+df_sample <- df[sample(1:nrow(df), 1000), ]
 
-ggplot(df, aes(x = y3, y = c2)) +
-  geom_point() +
-  geom_smooth(method = "lm")
+# fit a linear regression between X at t=1 and Y at t=2
+lm_fit <- lm(y2 ~ x1, data = as.data.frame(df_sample))
+
+# save the residuals
+residuals <- lm_fit$residuals
+
+# plot the residuals versus X1
+ggplot(df_sample, aes(x = x1, y = residuals)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "loess", se = FALSE) +
+  theme_minimal() 
