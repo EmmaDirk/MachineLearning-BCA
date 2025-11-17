@@ -5,13 +5,95 @@
 \begin{document}
 
 \section*{Notes on Variance Calculations}
+The mathematical derivations showing how we can set achieve the following in our simulations:
 
-We have variables X over occasions T and Y over occasions T. This yields matrix:
+\begin{itemize}
+    \item The variance of $X$, $Y$ and $C$ is 1.
+    \item Each variable has a mean 0.
+    \item The autoregressive effects of $X_{t-1}$ on $X_t$ is 0.25 (same for $Y_{t-1}$ on $Y_t$).
+    \item The lag-1 cross effect of $X_{t-1}$ on $Y_t$ is 0.10 (same for $Y_{t-1}$ on $X_t$).
+    \item There are 3 confounders, and hence k=3.
+    \item Their effects differ for X and Y, such that X is affected at [0.30, 0.20, 0.10] and Y is affected at [0.30, 0.20, 0.10].
+    \item The innovations have residual correlations of 0.3 at each time-point, but not across time-points.
+\end{itemize}
 
-\[ Z_t = \begin{bmatrix} X_t \\ Y_t \end{bmatrix} \]
+\subsection*{Defining matrices}
 
-For one indiv
+We have variables $X$ over occasions $T$ and $Y$ over occasions $T$. This yields the vector:
 
+\[
+Z_t = \begin{bmatrix} X_t \\ Y_t \end{bmatrix}
+\]
+
+For one individual \textit{i}, the vector looks like:
+
+\[
+Z_i =
+\begin{bmatrix}
+X_{i1} \\
+Y_{i1} \\
+X_{i2} \\
+Y_{i2} \\
+X_{i3} \\
+Y_{i3} \\
+X_{i4} \\
+Y_{i4} \\
+X_{i5} \\
+Y_{i5}
+\end{bmatrix}.
+\]
+
+Expanding for $N$ individuals:
+
+\[
+Z =
+\begin{bmatrix}
+X_{1,1} & Y_{1,1} & X_{1,2} & Y_{1,2} & X_{1,3} & Y_{1,3} & X_{1,4} & Y_{1,4} & X_{1,5} & Y_{1,5} \\
+X_{2,1} & Y_{2,1} & X_{2,2} & Y_{2,2} & X_{2,3} & Y_{2,3} & X_{2,4} & Y_{2,4} & X_{2,5} & Y_{2,5} \\
+\vdots  & \vdots  & \vdots  & \vdots  & \vdots  & \vdots  & \vdots  & \vdots  & \vdots  & \vdots  \\
+X_{N,1} & Y_{N,1} & X_{N,2} & Y_{N,2} & X_{N,3} & Y_{N,3} & X_{N,4} & Y_{N,4} & X_{N,5} & Y_{N,5}
+\end{bmatrix}.
+\]
+
+Now for time-point $t$, $X_t$ and $Y_t$ are made up of some part of the confounder effect, some part innovations (unexplained variances), 
+and if $t>0$, some part of the dynamic process, i.e.\ the lagged and autoregressive effects. We can capture this in the formula:
+
+\[
+Z_t = A Z_{t-1} + B U + E_t,
+\]
+where
+\begin{itemize}
+    \item $A$ is the matrix of autoregressive and cross-lagged effects,
+    \item $B$ is the matrix of confounder effects,
+    \item $U$ is the vector of time-invariant confounders,
+    \item $E_t$ is the vector of innovations at time-point $t$.
+\end{itemize}
+
+If we choose our effects as denoted above we get the following $A$ matrix:
+
+\[
+A = \begin{bmatrix} a_x & b_y \\ b_x & a_y \end{bmatrix} = \\begin{bmatrix} 0.25 & 0.10 \\ 0.10 & 0.25 \end{bmatrix}
+\]
+
+We get the following beta matrix:
+
+\[
+B = \begin{bmatrix} c_{x1} & c_{x2} & c_{x3} \\ c_{y1} & c_{y2} & c_{y3} \end{bmatrix} = \\begin{bmatrix} 0.30 & 0.20 & 0.10 \\ 0.30 & 0.20 & 0.10 \end{bmatrix}
+\]
+
+And matrix U:
+\[
+U =
+\begin{bmatrix}
+c_{1,1} & c_{1,2} & c_{1,3} \\
+c_{2,1} & c_{2,2} & c_{2,3} \\
+c_{3,1} & c_{3,2} & c_{3,3} \\
+\vdots  & \vdots  & \vdots  \\
+c_{N,1} & c_{N,2} & c_{N,3}
+\end{bmatrix}.
+\]
+
+Since the innovations matrix needs to be specified based on the other matrixes, we need to calculate the values that go into it.
 
 \end{document}
 
