@@ -11,6 +11,12 @@
 # 5. The confounding variables will have effects of 0.2 on X and 0.15 Y.
 # 6. The innovations will have residual correlations of 0.3 at each time-point, but not across time-points.
 
+# Let's rephrase what we are doing here. We have got some knowns, because we specify them. They include the
+# effects matrix A, the effects matrix B and the variance matrix psi. We also know that the diagonal of S 
+# is supposed to be 1. This leaves us with 2 unknowns. We do not know the variance of the innovations, and we
+# do not know the covariance between X and Y. Hence all code is actually just a way of solving for these unknowns
+# that we need to simulate data. 
+
 # reproducibility
 set.seed(427) 
 
@@ -28,6 +34,7 @@ ax <- 0.25                                                 # effect of X_(t-1) o
 ay <- 0.25                                                 # effect of Y_(t-1) on Y_t
 bx <- 0.10                                                 # effect of Y_(t-1) on X_t
 by <- 0.10                                                 # effect of X_(t-1) on Y_t
+rho <- 0.30                                                # residual correlation of innovations
                                                           
 # create the path matrix A from these effects
 A <- matrix(c(ax, by, bx, ay), nrow=2, byrow=TRUE)
@@ -51,7 +58,67 @@ S_target <- diag(2)                                        # since we have two v
 # which is simply the variance of the confounders*effect size 
 # psi contains their varcov matrix, and B contains the effect sizes. 
 # we use var(Ax) = A*var(x)*A' -> B*psi*B', and since psi=I, we get B*B'
+# however, if we wished to specify correlated confounders, we could do so by changing psi accordingly.
 S_U  <- B %*% Psi %*% t(B)
+
+# now we want to specify a correlation rho between the innovations of X and Y.
+# which means the part that is not explained by the confounders or lagged relationships
+# still correlate with each other. Our job is to finjd out: given we specify a value rho,
+# denoting the correlation between the innovations of X and Y, what must the covariance between X and Y be,
+# while accounting for the covariance that is already induced by the confounders and the lagged relationships.
+# In one question: Given S_U, A and our desired rho, what must the covariance between X and Y be in order for
+# the system to be stationary? 
+
+find_c <- function(A, S_U, rho) {
+
+  # function of c: difference between actual innovation correlation and target rho
+  # we need to calculate how much covariance is induced by c and the lagged relationships
+  f <- function(c) {
+
+    # target stationary covariance of (X_t, Y_t)
+    # the variances are 1 since we specified them to be
+    # and the covariance is c, which we are searching for
+    S_target_c <- matrix(c(1, c,
+                           c, 1),
+                         nrow = 2, byrow = TRUE)
+    
+    # dynamic part variance
+    # first we get rid of the confounder-induced variance
+    S_dyn_c <- S_target_c - S_U
+    
+    # now we can compute the innovation covariance matrix
+    # based on the stationarity constraints
+    Sigma_e_c <- S_dyn_c - t(A) %*% S_dyn_c %*% A
+    
+    # compute correlation of innovations
+    # the variation of innovations of X is v1
+    v1 <- Sigma_e_c[1, 1]
+    # the variation of innovations of Y is v2
+    v2 <- Sigma_e_c[2, 2]
+    # their covariance is cov12
+    cov12 <- Sigma_e_c[1, 2]
+    #their correlation is then:
+    corr_e <- cov12 / sqrt(v1 * v2)
+    
+    # this is then the difference between the desired correlation and the actual correlation
+    corr_e - rho
+  }
+
+  # now this function f(c) should be zero when we have found the correct c
+  # as such we can look for the value of corr_e that makes f(c) = 0.
+  # Note that if the matrix A would be symmetric, then v1=v2, and we have
+  # a closed form solution for v. With two uknowns, we lack an equation and
+  # need to solve numerically. 
+  uniroot(f, interval = c(-0.99, 0.99))$root
+}
+
+# use the function to find the required covariance between X and Y
+c_stat <- find_c(A, S_U, rho)
+
+# overwrite S_target to include the stationary covariance between X and Y
+S_target <- matrix(c(1, c_stat,
+                     c_stat, 1),
+                   nrow = 2, byrow = TRUE)
 
 # variance by the dynamic process:
 # now we know that any variance that does not come directly from the confounder, must come from the dynamic process (feed forward + innovations)
@@ -87,7 +154,7 @@ Sigma_e <- (Sigma_e + t(Sigma_e))/2
 
 # For t = 1, there is no carryover from a previous wave. The observed var-cov should be:
 # Var([X1,Y1]) = S_U + Sigma_e1. To keep the same S_target at t=1, set:
-Sigma_e1 <- S_target - S_U
+Sigma_e1 <- S_dyn                             # because S_target = S_U + S_dyn
 Sigma_e1 <- (Sigma_e1 + t(Sigma_e1))/2
 
 # we can first generate our confounders, since they are exogenous
@@ -103,7 +170,7 @@ U <- rmvnorm(N,
 #  for t = 1: no lag yet, so Ddyn = e1 with Sigma_e1 ----
 Ddyn <- rmvnorm(N,                            
   mean=c(0,0),                                # mean of the variables X and Y = 0, since we want standardised effect sizes
-  sigma=Sigma_e1)                             # innovation covariance for the first wave (no lag)
+  sigma=Sigma_e1)                             # dynamic part covariance for the first wave
 
 # initialise df with N rows and 2*T + k columns. 2*T for X and Y, k for confounders
 df <- matrix(NA, nrow = N, ncol = 2*T + k)
@@ -151,7 +218,7 @@ round(sigma, 3)
 describe(df)
 
 # create a sample dataframe for plotting residuals 
-df_sample <- df[sample(1:nrow(df), 1000), ]
+df_sample <- df[sample(1:nrow(df), 10000), ]
 
 # fit a linear regression between X at t=1 and Y at t=2
 lm_fit <- lm(y2 ~ x1, data = as.data.frame(df_sample))
@@ -163,4 +230,8 @@ residuals <- lm_fit$residuals
 ggplot(df_sample, aes(x = x1, y = residuals)) +
   geom_point(alpha = 0.5) +
   geom_smooth(method = "loess", se = FALSE) +
-  theme_minimal() 
+  theme_minimal()
+
+# cache the data to the data folder
+write.csv(df, file = "Code/Data/Data_Sim_linear_Pop.csv", row.names = FALSE)
+
