@@ -1,0 +1,252 @@
+---
+title: "BCA SEM"
+subtitle: "Population level analyses"
+author: "Mano van Holten"
+date: "2025-12-18"
+
+format:
+  revealjs:
+    theme: moon
+    slide-number: true
+    transition: fade
+---
+
+# Model specification.
+
+
+
+# Data generation
+
+```{r}
+
+library(tidyverse)
+library(patchwork)
+
+# reading data
+linear    <- read.csv("C:/Users/Admin/Desktop/UU/Thesis/Code/Data/Data_Sim_linear_Pop.csv")
+cubic_10  <- read.csv("C:/Users/Admin/Desktop/UU/Thesis/Code/Data/Data_Sim_Cubic_0.10_Pop.csv")
+cubic_18  <- read.csv("C:/Users/Admin/Desktop/UU/Thesis/Code/Data/Data_Sim_Cubic_0.18_Pop.csv")
+cubic_41  <- read.csv("C:/Users/Admin/Desktop/UU/Thesis/Code/Data/Data_Sim_Cubic_0.41_Pop.csv")
+cubic_89  <- read.csv("C:/Users/Admin/Desktop/UU/Thesis/Code/Data/Data_Sim_Cubic_0.89_Pop.csv")
+
+# take samples of each dataset
+linear <- linear %>% sample_n(2000)
+cubic_10 <- cubic_10 %>% sample_n(2000)
+cubic_18 <- cubic_18 %>% sample_n(2000)
+cubic_41 <- cubic_41 %>% sample_n(2000)
+cubic_89 <- cubic_89 %>% sample_n(2000)
+
+# regress x1 on c1
+mod_lin     <- lm(x1 ~ c1, data = linear)
+mod_cub_10  <- lm(x1 ~ c1, data = cubic_10)
+mod_cub_18  <- lm(x1 ~ c1, data = cubic_18)
+mod_cub_41  <- lm(x1 ~ c1, data = cubic_41)
+mod_cub_89  <- lm(x1 ~ c1, data = cubic_89)
+
+# add residuals as columns in the data
+linear$resid    <- resid(mod_lin)
+cubic_10$resid  <- resid(mod_cub_10)
+cubic_18$resid  <- resid(mod_cub_18)
+cubic_41$resid  <- resid(mod_cub_41)
+cubic_89$resid  <- resid(mod_cub_89)
+
+# plot residuals versus predictor
+p1 <- ggplot(linear, aes(x = c1, y = resid)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "loess", se = FALSE) +
+  theme_minimal() +
+  ggtitle("Linear")
+
+p2 <- ggplot(cubic_10, aes(x = c1, y = resid)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "loess", se = FALSE) +
+  theme_minimal() +
+  ggtitle("Cubic 0.10")
+
+p3 <- ggplot(cubic_18, aes(x = c1, y = resid)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "loess", se = FALSE) +
+  theme_minimal() +
+  ggtitle("Cubic 0.18")
+
+p4 <- ggplot(cubic_41, aes(x = c1, y = resid)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "loess", se = FALSE) +
+  theme_minimal() +
+  ggtitle("Cubic 0.41")
+
+p5 <- ggplot(cubic_89, aes(x = c1, y = resid)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "loess", se = FALSE) +
+  theme_minimal() +
+  ggtitle("Cubic 0.89")
+
+# put together with patchwork
+(p1 | p2) /
+(p3 | p4) /
+p5
+
+```
+
+# Model estimation
+
+```{r}
+
+library(lavaan)
+
+# reading data
+linear    <- read.csv("C:/Users/Admin/Desktop/UU/Thesis/Code/Data/Data_Sim_linear_Pop.csv")
+cubic_10  <- read.csv("C:/Users/Admin/Desktop/UU/Thesis/Code/Data/Data_Sim_Cubic_0.10_Pop.csv")
+cubic_18  <- read.csv("C:/Users/Admin/Desktop/UU/Thesis/Code/Data/Data_Sim_Cubic_0.18_Pop.csv")
+cubic_41  <- read.csv("C:/Users/Admin/Desktop/UU/Thesis/Code/Data/Data_Sim_Cubic_0.41_Pop.csv")
+cubic_89  <- read.csv("C:/Users/Admin/Desktop/UU/Thesis/Code/Data/Data_Sim_Cubic_0.89_Pop.csv")
+
+# CLPM model
+model_clpm <- "
+X2 + Y2 ~ X1 + Y1
+X3 + Y3 ~ X2 + Y2
+X4 + Y4 ~ X3 + Y3
+X5 + Y5 ~ X4 + Y4
+
+X1 ~~ Y1
+X2 ~~ Y2
+X3 ~~ Y3
+X4 ~~ Y4
+X5 ~~ Y5
+
+X1 ~~ X1
+Y1 ~~ Y1
+X2 ~~ X2
+Y2 ~~ Y2
+X3 ~~ X3
+Y3 ~~ Y3
+X4 ~~ X4
+Y4 ~~ Y4
+X5 ~~ X5
+Y5 ~~ Y5
+
+X1 ~ 1
+X2 ~ 1
+X3 ~ 1
+X4 ~ 1
+X5 ~ 1
+Y1 ~ 1
+Y2 ~ 1
+Y3 ~ 1
+Y4 ~ 1
+Y5 ~ 1
+"
+
+# DPM
+model_dpm <- "
+FX =~ 1*X2 + 1*X3 + 1*X4 + 1*X5
+FY =~ 1*Y2 + 1*Y3 + 1*Y4 + 1*Y5
+
+FX ~~ X1 + Y1
+FY ~~ X1 + Y1
+
+X2 + Y2 ~ X1 + Y1
+X3 + Y3 ~ X2 + Y2
+X4 + Y4 ~ X3 + Y3
+X5 + Y5 ~ X4 + Y4
+
+X1 ~~ Y1
+X2 ~~ Y2
+X3 ~~ Y3
+X4 ~~ Y4
+X5 ~~ Y5
+
+FX ~~ FX
+FY ~~ FY
+FX ~~ FY
+
+X1 ~~ X1
+X2 ~~ X2
+X3 ~~ X3
+X4 ~~ X4
+X5 ~~ X5
+Y1 ~~ Y1
+Y2 ~~ Y2
+Y3 ~~ Y3
+Y4 ~~ Y4
+Y5 ~~ Y5
+
+X1 ~ 1
+X2 ~ 1
+X3 ~ 1
+X4 ~ 1
+X5 ~ 1
+Y1 ~ 1
+Y2 ~ 1
+Y3 ~ 1
+Y4 ~ 1
+Y5 ~ 1
+"
+
+# RICLPM
+model_riclpm <- "
+RIX =~ 1*X1 + 1*X2 + 1*X3 + 1*X4 + 1*X5
+RIY =~ 1*Y1 + 1*Y2 + 1*Y3 + 1*Y4 + 1*Y5
+RIX ~~ RIX
+RIY ~~ RIY
+RIX ~~ RIY
+
+X1 ~~ 0*X1; X2 ~~ 0*X2; X3 ~~ 0*X3; X4 ~~ 0*X4; X5 ~~ 0*X5
+Y1 ~~ 0*Y1; Y2 ~~ 0*Y2; Y3 ~~ 0*Y3; Y4 ~~ 0*Y4; Y5 ~~ 0*Y5
+
+wX1 =~ 1*X1; wX2 =~ 1*X2; wX3 =~ 1*X3; wX4 =~ 1*X4; wX5 =~ 1*X5
+wY1 =~ 1*Y1; wY2 =~ 1*Y2; wY3 =~ 1*Y3; wY4 =~ 1*Y4; wY5 =~ 1*Y5
+
+RIX ~~ 0*wX1 + 0*wX2 + 0*wX3 + 0*wX4 + 0*wX5
+RIX ~~ 0*wY1 + 0*wY2 + 0*wY3 + 0*wY4 + 0*wY5
+RIY ~~ 0*wX1 + 0*wX2 + 0*wX3 + 0*wX4 + 0*wX5
+RIY ~~ 0*wY1 + 0*wY2 + 0*wY3 + 0*wY4 + 0*wY5
+
+wX1 ~~ wX1; wX2 ~~ wX2; wX3 ~~ wX3; wX4 ~~ wX4; wX5 ~~ wX5
+wY1 ~~ wY1; wY2 ~~ wY2; wY3 ~~ wY3; wY4 ~~ wY4; wY5 ~~ wY5
+wY1 ~~ wX1; wY2 ~~ wX2; wY3 ~~ wX3; wY4 ~~ wX4; wY5 ~~ wX5
+
+wX2 ~ wX1 + wY1
+wY2 ~ wX1 + wY1
+wX3 ~ wX2 + wY2
+wY3 ~ wX2 + wY2
+wX4 ~ wX3 + wY3
+wY4 ~ wX3 + wY3
+wX5 ~ wX4 + wY4
+wY5 ~ wX4 + wY4
+
+X1 + X2 + X3 + X4 + X5 ~ mX*1
+Y1 + Y2 + Y3 + Y4 + Y5 ~ mY*1
+"
+
+# first use a linear regression to create the residuals
+mod_lin     <- lm(x1 ~ c1, data = linear)
+mod_cub_10  <- lm(x1 ~ c1, data = cubic_10)
+mod_cub_18  <- lm(x1 ~ c1, data = cubic_18)
+mod_cub_41  <- lm(x1 ~ c1, data = cubic_41)
+mod_cub_89  <- lm(x1 ~ c1, data = cubic_89)
+
+# extract residuals
+linear$resid    <- resid(mod_lin)
+cubic_10$resid  <- resid(mod_cub_10)
+cubic_18$resid  <- resid(mod_cub_18)
+cubic_41$resid  <- resid(mod_cub_41)
+cubic_89$resid  <- resid(mod_cub_89)
+
+# use regression trees to create the residuals
+
+
+
+# fit all models on all datasets
+fit_lin_clpm    <- sem(model_clpm, data = linear)
+fit_cub10_clpm  <- sem(model_clpm, data = cubic_10)
+fit_cub18_clpm  <- sem(model_clpm, data = cubic_18)
+fit_cub41_clpm  <- sem(model_clpm, data = cubic_41)
+fit_cub89_clpm  <- sem(model_clpm, data = cubic_89)
+
+
+
+
+
+
+```
