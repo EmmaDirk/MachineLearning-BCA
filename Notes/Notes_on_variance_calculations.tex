@@ -15,13 +15,13 @@ The mathematical derivations showing how we can achieve the following in our pan
     \item There are 3 confounders, and hence $k=3$.
     \item Their effects differ for X and Y, such that X is affected at [0.30, 0.20, 0.10] and Y is affected at [0.30, 0.20, 0.10].
     \item The innovations have residual correlations of 0.3 at each time-point, but not across time-points.
-    \item At the first time-point ($T=0$), X and Y are correlated due to the confounding variables. 
+    \item At the first time-point ($T=0$), X and Y are correlated due to the confounding variables.
     \item At the first time-point, we can assume that the dynamic process was going on before the data started being collected. Hence,
     the 'observed' covariance matrix S between X and Y should be the same for the first measurement occassion. But since we do not have 
     any previous time-point creating feed forward effects, X and Y should be simulated with 'extra' covariance as if they were 'caused' 
-    by previous variables. 
+    by previous variables.
     \item One possible extention: confounders in reality are with a very high probability not uncorrelated. In the event that these are 
-    correlated, we get a true matrix Psi instead of the indentity matrix I. Calculations are not affected with respect to unknown values. 
+    correlated, we get a true matrix Psi instead of the identity matrix I. Calculations are not affected with respect to unknown values. 
 \end{itemize}
 
 What we need to do, is to find the right variance for the innovations such that the total variance of X and Y becomes 1. We also need to find
@@ -73,11 +73,12 @@ X_{N,1} & Y_{N,1} & X_{N,2} & Y_{N,2} & X_{N,3} & Y_{N,3} & X_{N,4} & Y_{N,4} & 
 \]
 
 \noindent
-Now for time-point $t$, $X_t$ and $Y_t$ are made up of some part of the confounder effect, and some part by the dynamic efects. With
+Now for time-point $t$, $X_t$ and $Y_t$ are made up of some part of the confounder effect, and some part by the dynamic effects. With
 the dynamic effects here we mean every effect that 'feeds forward' to the next time-point. For the first time-point, there are no dynamic
 effects at all, since there are no previous time-points. Since we assume the process does not start with measurement, the observed correlation
-matrix between X and Y should be unnafected though. Another way of phrasing this is that some part of the variance in X (or Y) is explained 
-by the confounders, some part is explained by the dynamic effects, and some part is explained by the innovations. We can capture this in the formula:
+matrix between X and Y should be unaffected though. Another way of phrasing this is that some part of the variance in X (or Y) is explained 
+by the confounders, some part is explained by the dynamic effects, and some part is explained by the innovations. We can capture this in the
+formula:
 
 \[
 Z_t = A Z_{t-1} + B U + E_t,
@@ -101,14 +102,16 @@ a similar covariance matrix, the part of variance received from the previous tim
 If we choose our effects as denoted above we get the following $A$ matrix:
 
 \[
-A = \begin{bmatrix} a_x & b_y \\ b_x & a_y \end{bmatrix} = \begin{bmatrix} 0.25 & 0.10 \\ 0.10 & 0.25 \end{bmatrix}
+A = \begin{bmatrix} a & b \\ b & a \end{bmatrix}
+= \begin{bmatrix} 0.25 & 0.10 \\ 0.10 & 0.25 \end{bmatrix}
 \]
 
 \noindent
 We get the following beta matrix:
 
 \[
-B = \begin{bmatrix} c_{x1} & c_{x2} & c_{x3} \\ c_{y1} & c_{y2} & c_{y3} \end{bmatrix} = \begin{bmatrix} 0.30 & 0.20 & 0.10 \\ 0.30 & 0.20 & 0.10 \end{bmatrix}
+B = \begin{bmatrix} c_{x1} & c_{x2} & c_{x3} \\ c_{y1} & c_{y2} & c_{y3} \end{bmatrix}
+= \begin{bmatrix} 0.30 & 0.20 & 0.10 \\ 0.30 & 0.20 & 0.10 \end{bmatrix}
 \]
 
 \noindent
@@ -128,7 +131,9 @@ c_{N,1} & c_{N,2} & c_{N,3}
 \noindent
 Finally, we can specify the innovations matrix as:
 
-\[E_t = \begin{bmatrix} e_{X_t} \\ e_{Y_t} \end{bmatrix}\]
+\[
+E_t = \begin{bmatrix} e_{X_t} \\ e_{Y_t} \end{bmatrix}
+\]
 
 \newpage
 
@@ -137,46 +142,75 @@ Finally, we can specify the innovations matrix as:
 \noindent
 As we just denoted, each measurement occasion takes some variance from the confounders and some from the dynamic effect. The variance received from
 the confounders is time-invariant, which means we can calculate it directly. Since the variances of all variables (and thus also the confounders) is 1,
-and the confoudners are not correlated with each other, their covariance matrix is the identity matrix $I$. Note that including confounder covariance
-does not change very much about the calculations, since its a value we just pick and insert using psi. Hence, the variance received from the confounders is:
+and the confounders are not correlated with each other, their covariance matrix is the identity matrix $I$. Note that including confounder covariance
+does not change very much about the calculations, since it is a value we just pick and insert using $\Psi$. Hence, the variance received from the confounders is:
 
-\[S_U = B \Psi B^T = B I B^T = B B^T\]
+\[
+S_U = B \Psi B^T = B I B^T = B B^T
+\]
 
 \noindent
 If we use the values from above, we get: 
 
-\[S_U = \begin{bmatrix} 0.30 & 0.20 & 0.10 \\ 0.30 & 0.20 & 0.10 \end{bmatrix} \begin{bmatrix} 0.30 & 0.30 \\ 0.20 & 0.20 \\ 0.10 & 0.10 \end{bmatrix} = \begin{bmatrix} 0.14 & 0.14 \\ 0.14 & 0.14 \end{bmatrix}\]
+\[
+S_U = 
+\begin{bmatrix} 0.30 & 0.20 & 0.10 \\ 0.30 & 0.20 & 0.10 \end{bmatrix}
+\begin{bmatrix} 0.30 & 0.30 \\ 0.20 & 0.20 \\ 0.10 & 0.10 \end{bmatrix}
+= 
+\begin{bmatrix} 0.14 & 0.14 \\ 0.14 & 0.14 \end{bmatrix}
+\]
 
 \newpage
 
 \subsection*{The innovation covariance matrix}
 
 \noindent
-The confounders add a variance of 0.14 to both X and Y, and a covariance of 0.14 between X and Y at each time-point. We wanted each variable to have a variance of 1, 
-which means that the dynamic effect still needs to add 1-0.14 = 0.86 to the variance of each variable. We also want the innovations to have a correlation of 0.3
-at each time-point, which means that the part of X and Y that cannot be explained by $X_{t-1}$ and $Y_{t-1}$ or C needs to be correlated at 0.3. In math notation, we want:
+The confounders add a variance of 0.14 to both X and Y, and a covariance of 0.14 between X and Y at each time-point. We wanted each variable to have 
+a variance of 1, which means that the dynamic effect still needs to add $1 - 0.14 = 0.86$ to the variance of each variable. We also want the innovations 
+to have a correlation of 0.3 at each time-point, which means that the part of X and Y that cannot be explained by $X_{t-1}$ and $Y_{t-1}$ or C needs to 
+be correlated at 0.3. In math notation, we want:
 
-\[Corr(e_{X_t}, e_{Y_t}) = \rho = 0.3\]
+\[
+\mathrm{Corr}(e_{X_t}, e_{Y_t}) = \rho = 0.3
+\]
 
 \noindent
 We can denote the variance of the innovations as:
 
-\[Var(e_{X_t}) = v_1\] and \[Var(e_{Y_t}) = v_2\]
+\[
+\mathrm{Var}(e_{X_t}) = v_1
+\qquad\text{and}\qquad
+\mathrm{Var}(e_{Y_t}) = v_2
+\]
 
 \noindent
 The covariance between the innovations is then their correlation multiplied by their standard deviations:
 
-\[Cov(e_{X_t}, e_{Y_t}) = \rho \sqrt{v_1} \sqrt{v_2}\]
+\[
+\mathrm{Cov}(e_{X_t}, e_{Y_t}) = \rho \sqrt{v_1} \sqrt{v_2}
+\]
 
 \noindent
 The covariance matrix of the innovations can then be written as:
 
-\[S_E = \begin{bmatrix} v_1 & \rho \sqrt{v_1} \sqrt{v_2} \\ \rho \sqrt{v_1} \sqrt{v_2} & v_2 \end{bmatrix}\]
+\[
+S_E =
+\begin{bmatrix}
+v_1 & \rho\sqrt{v_1 v_2} \\
+\rho\sqrt{v_1 v_2} & v_2
+\end{bmatrix}
+\]
 
 \noindent 
-Since we know that rho is 0.3, we can rewrite this as:
+Since we know that $\rho = 0.3$, we can rewrite this as:
 
-\[S_E = \begin{bmatrix} v_1 & 0.3 \sqrt{v_1} \sqrt{v_2} \\ 0.3 \sqrt{v_1} \sqrt{v_2} & v_2 \end{bmatrix}\]
+\[
+S_E =
+\begin{bmatrix}
+v_1 & 0.3\sqrt{v_1 v_2} \\
+0.3\sqrt{v_1 v_2} & v_2
+\end{bmatrix}
+\]
 
 \noindent
 Which leaves us with two unknown values: $v_1$ and $v_2$. We need to choose these such that the total variance of X and Y becomes 1. 
@@ -189,29 +223,49 @@ Another way of phrasing this requirement is that $S$, which is the total varianc
 \noindent
 Now first we need to specify what $S$ looks like. We know that:
 
-\[S = var(Z_t) = \begin{bmatrix} var(X_t) & cov(X_t, Y_t) \\ cov(X_t, Y_t) & var(Y_t) \end{bmatrix}\]
+\[
+S = \mathrm{Var}(Z_t) = 
+\begin{bmatrix}
+\mathrm{Var}(X_t) & \mathrm{Cov}(X_t, Y_t) \\
+\mathrm{Cov}(X_t, Y_t) & \mathrm{Var}(Y_t)
+\end{bmatrix}
+\]
 
 \noindent
 We want the variance of X and Y to be 1, which means that we want:
 
-\[var(X_t) = var(Y_t) = 1\], yielding:
+\[
+\mathrm{Var}(X_t) = \mathrm{Var}(Y_t) = 1
+\]
 
-\[S = \begin{bmatrix} 1 & cov(X_t, Y_t) \\ cov(X_t, Y_t) & 1 \end{bmatrix}\]
+yielding:
+
+\[
+S =
+\begin{bmatrix}
+1 & \mathrm{Cov}(X_t, Y_t) \\
+\mathrm{Cov}(X_t, Y_t) & 1
+\end{bmatrix}
+\]
 
 \noindent
-We can now denote $cov(X_t, Y_t)$ as $c$. This yields:
+We can now denote $\mathrm{Cov}(X_t, Y_t)$ as $c$. This yields:
 
-\[S = \begin{bmatrix} 1 & c \\ c & 1 \end{bmatrix}\]
-
-\noindent
-Note that this covariance matrix is statiorary when it is the same for all time-points. In order to satisfy this constraint, the following equation must hold:
-
-\[S = A S A^T + S_U + S_E\]
+\[
+S = \begin{bmatrix} 1 & c \\ c & 1 \end{bmatrix}
+\]
 
 \noindent
-The covariance matrix of the current time-point, is equal to that of the previous time-point, multiplied by the cross-lagged and autoregressive effects, 
+Note that this covariance matrix is stationary when it is the same for all time-points. In order to satisfy this constraint, the following equation must hold:
+
+\[
+S = A S A^T + S_U + S_E
+\]
+
+\noindent
+The covariance matrix of the current time-point is equal to that of the previous time-point, multiplied by the cross-lagged and autoregressive effects, 
 plus the variance received from the confounders, plus the variance received from the innovations. We must solve this equation for $v_1$, $v_2$ and $c$. 
-$v1$ and $v_2$ are only present in $S_E$, while $c$ is only present in $S$. Expanding the equation yields:
+$v_1$ and $v_2$ are only present in $S_E$, while $c$ is only present in $S$. Expanding the equation yields:
 
 \[
 \begin{bmatrix}
@@ -236,128 +290,171 @@ v_1 & \rho\sqrt{v_1 v_2} \\
 \]
 
 \noindent
-Note that on the left side is our desired stationary variance covariance matrix between X and Y, containing unknown $c$. On the right 
+Note that on the left side is our desired stationary variance-covariance matrix between X and Y, containing unknown $c$. On the right 
 side we have the part carried over from the previous wave, the part contributed by the confounders, and the part added by the 
 innovations. We can rewrite this as a system of equations:
 
-\[1 = (ASA^\top)_{11} + 0.14 + v_1\] 
+\[
+1 = (ASA^\top)_{11} + 0.14 + v_1
+\]
 
-and
+\[
+1 = (ASA^\top)_{22} + 0.14 + v_2
+\]
 
-\[1 = (ASA^\top)_{22} + 0.14 + v_2\]
-
-and
-
-\[c = (ASA^\top)_{12} + 0.14 + \rho\sqrt{v_1 v_2}\]
+\[
+c = (ASA^\top)_{12} + 0.14 + \rho\sqrt{v_1 v_2}
+\]
 
 \noindent
 Note that the two off-diagonal elements are equal, since covariance matrices are symmetric. As such,
 the equation for $c$ only yields one equation. We should now compute $ASA^\top$ for all these equations.
 Recall that $A$ is:
 
-\[A = \begin{bmatrix} a & b \\ b & a \end{bmatrix} =\begin{bmatrix} 1 & 0.25 \\ 0.25 & 1 \end{bmatrix}\]
+\[
+A = \begin{bmatrix} a & b \\ b & a \end{bmatrix}
+= \begin{bmatrix} 0.25 & 0.10 \\ 0.10 & 0.25 \end{bmatrix}
+\]
 
 \noindent
-Which can be written down without subscripts X and Y since we set them to equal values in this case. Now 
-given the positions of a and b in the matrix, the equations simplify to:
+Now given the positions of $a$ and $b$ in the matrix, the equations simplify to:
 
-\[(ASA^\top)_{11} = a^2S_{11} + 2abS_{12} + b^2S_{22}\]
+\[
+(ASA^\top)_{11} = a^2S_{11} + 2abS_{12} + b^2S_{22}
+\]
 
-and
+\[
+(ASA^\top)_{22} = a^2S_{11} + 2abS_{12} + b^2S_{22}
+\]
 
-\[(ASA^\top)_{22} = a^2S_{11} + 2abS_{12} + b^2S_{22}\]
-
-and
-
-\[(ASA^\top)_{12} = abS_{11} + (a^2 + b^2)S_{12} + abS_{22}\]
+\[
+(ASA^\top)_{12} = abS_{11} + (a^2 + b^2)S_{12} + abS_{22}
+\]
 
 \noindent
 Now note that $S_{11} = S_{22} = 1$ and $S_{12} = c$. This yields:
 
-\[(ASA^\top)_{11} = a^2 + 2abc + b^2\]
+\[
+(ASA^\top)_{11} = a^2 + 2abc + b^2
+\]
 
-and
+\[
+(ASA^\top)_{22} = a^2 + 2abc + b^2
+\]
 
-\[(ASA^\top)_{22} = a^2 + 2abc + b^2\]
-
-and
-
-\[(ASA^\top)_{12} = 2ab + (a^2 + b^2)c\]
+\[
+(ASA^\top)_{12} = 2ab + (a^2 + b^2)c
+\]
 
 \noindent
 Since we know $a=0.25$ and $b=0.10$, we can insert these values:
 
-\[(ASA^\top)_{11} = 0.0725 + 0.05c + 0.25^2\]
+\[
+(ASA^\top)_{11} = 0.25^2 + 2(0.25)(0.10)c + 0.10^2 = 0.0725 + 0.05c
+\]
 
-and
+\[
+(ASA^\top)_{22} = 0.0725 + 0.05c
+\]
 
-\[(ASA^\top)_{22} = 0.7625 + 0.05c + 0.25^2\]
-
-and
-
-\[(ASA^\top)_{12} = 0.05 + 0.0725c\]
+\[
+(ASA^\top)_{12} = 2(0.25)(0.10) + (0.25^2 + 0.10^2)c = 0.05 + 0.0725c
+\]
 
 \noindent
 We can plug these into our system of equations:
 
-\[1 = (0.0725 + 0.05c + 0.25^2) + 0.14 + v_1\]
+\[
+1 = (0.0725 + 0.05c) + 0.14 + v_1
+\]
 
-and
+\[
+1 = (0.0725 + 0.05c) + 0.14 + v_2
+\]
 
-\[1 = (0.0725 + 0.05c + 0.25^2) + 0.14 + v_2\]
-
-and
-
-\[c = (0.05 + 0.0725c) + 0.14 + \rho\sqrt{v_1 v_2}\]
+\[
+c = (0.05 + 0.0725c) + 0.14 + \rho\sqrt{v_1 v_2}
+\]
 
 \noindent
 Now note that the first two equations are only different in $v_1$ and $v_2$. The left side of the equations is the same. 
 From these two facts we can conclude that $v_1 = v_2$. The first two equations are thus the same. We can now solve for $v$ 
-and rewrite this single equations as:
+and rewrite this single equation as:
 
-\[v = 1 - 0.14 - 0.0725 - 0.05c = 0.7875 - 0.05c\]
+\[
+v = 1 - 0.14 - 0.0725 - 0.05c = 0.7875 - 0.05c
+\]
 
 \noindent
 The variances of the innovations are thus equal and given by $v = 0.7875 - 0.05c$. We can now plug this formula for 
 $v$ into the third equation. First we use that $v_1 = v_2 = v$, yielding:
 
-\[c = (0.05 + 0.0725c) + 0.14 + \rho\sqrt{v_1 v_2} = 0.19 + 0.075c + \rho v\]
+\[
+c = (0.05 + 0.0725c) + 0.14 + \rho v
+\]
 
 \noindent
-and since we know $\rho = 0.3$, we can rewrite this as:
+Since $\rho = 0.3$, we can rewrite this as:
 
-\[c = 0.19 + 0.075c + 0.3v\]
+\[
+c = 0.19 + 0.0725c + 0.3v
+\]
 
 \noindent
 Now we can plug in the formula for $v$:
 
-\[c = 0.19 + 0.075c + 0.3(0.7875 - 0.05c)\]
+\[
+c = 0.19 + 0.0725c + 0.3(0.7875 - 0.05c)
+\]
 
 \noindent
-and after some magic, we can solve this for $c$, yielding a closed form solution for $c$:
+Solving this yields:
 
-\[c = \frac{0.19 + 0.7875*0.3}{0.9275+0.05*0.3} = 0.4523\] 
+\[
+c = \frac{0.19 + 0.7875 \cdot 0.3}{0.9275 + 0.05 \cdot 0.3} = 0.4523
+\]
 
 \noindent
 This result can now be plugged back into the formula for $v$:
 
-\[v = 0.7875 - 0.05*0.4523 = 0.7644\]
+\[
+v = 0.7875 - 0.05 \cdot 0.4523 = 0.7644
+\]
 
 \noindent
 And now we can populate the matrix $S_E$:
 
-\[S_E = \begin{bmatrix} v & \rhov \\ \rhov & v \end{bmatrix} = \begin{bmatrix} 0.7644 & 0.2295 \\ 0.2295 & 0.7644 \end{bmatrix}\]
+\[
+S_E =
+\begin{bmatrix}
+v & \rho v \\
+\rho v & v
+\end{bmatrix}
+=
+\begin{bmatrix}
+0.7644 & 0.2295 \\
+0.2295 & 0.7644
+\end{bmatrix}
+\]
 
 \noindent
-And we can plug the result for c back into the matrix S:
-\[S = \begin{bmatrix} 1 & c \\ c & 1 \end{bmatrix} = \begin{bmatrix} 1 & 0.4523 \\ 0.4523 & 1 \end{bmatrix}\]
+And we can plug the result for $c$ back into the matrix $S$:
+
+\[
+S =
+\begin{bmatrix}
+1 & c \\
+c & 1
+\end{bmatrix}
+=
+\begin{bmatrix}
+1 & 0.4523 \\
+0.4523 & 1
+\end{bmatrix}
+\]
 
 \noindent
-And now all our matrixes are fully known, and we can simulate data! 
-
-
-
-
+And now all our matrices are fully known, and we can simulate data! 
 
 \end{document}
 
