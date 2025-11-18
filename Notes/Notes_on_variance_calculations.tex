@@ -24,6 +24,13 @@ The mathematical derivations showing how we can achieve the following in our pan
     correlated, we get a true matrix Psi instead of the indentity matrix I. Calculations are not affected with respect to unknown values. 
 \end{itemize}
 
+What we need to do, is to find the right variance for the innovations such that the total variance of X and Y becomes 1. We also need to find
+out what correlation X and Y are supposed to have at each time-point. As such we have three unknowns: a variance of the innovation for X,
+a variance of the innovation for Y, and a correlation between X and Y. We must pick these values such that all our demands are met. In essence,
+this is the purpose of all math done here. 
+
+\newpage
+
 \subsection*{Defining matrices}
 
 \noindent
@@ -123,7 +130,9 @@ Finally, we can specify the innovations matrix as:
 
 \[E_t = \begin{bmatrix} e_{X_t} \\ e_{Y_t} \end{bmatrix}\]
 
-\subsection*{Calculating variances part 1}
+\newpage
+
+\subsection*{Confounder variance calculations}
 
 \noindent
 As we just denoted, each measurement occasion takes some variance from the confounders and some from the dynamic effect. The variance received from
@@ -138,10 +147,14 @@ If we use the values from above, we get:
 
 \[S_U = \begin{bmatrix} 0.30 & 0.20 & 0.10 \\ 0.30 & 0.20 & 0.10 \end{bmatrix} \begin{bmatrix} 0.30 & 0.30 \\ 0.20 & 0.20 \\ 0.10 & 0.10 \end{bmatrix} = \begin{bmatrix} 0.14 & 0.14 \\ 0.14 & 0.14 \end{bmatrix}\]
 
+\newpage
+
+\subsection*{The innovation covariance matrix}
+
 \noindent
 The confounders add a variance of 0.14 to both X and Y, and a covariance of 0.14 between X and Y at each time-point. We wanted each variable to have a variance of 1, 
 which means that the dynamic effect still needs to add 1-0.14 = 0.86 to the variance of each variable. We also want the innovations to have a correlation of 0.3
-at each time-point, which means that the part of X and Y that cannot be explained by $X_t-1$ and $Y_t-1$ or C needs to be correlated at 0.3. In math notation, we want:
+at each time-point, which means that the part of X and Y that cannot be explained by $X_{t-1}$ and $Y_{t-1}$ or C needs to be correlated at 0.3. In math notation, we want:
 
 \[Corr(e_{X_t}, e_{Y_t}) = \rho = 0.3\]
 
@@ -169,7 +182,9 @@ Since we know that rho is 0.3, we can rewrite this as:
 Which leaves us with two unknown values: $v_1$ and $v_2$. We need to choose these such that the total variance of X and Y becomes 1. 
 Another way of phrasing this requirement is that $S$, which is the total variance-covariance matrix of $Z_t$, needs to have 1s on the diagonal.
 
-\subsection*{Calculating variances part 2}
+\newpage
+
+\subsection*{The covariance matrix S (of X and Y)}
 
 \noindent
 Now first we need to specify what $S$ looks like. We know that:
@@ -221,6 +236,8 @@ v_1 & \rho\sqrt{v_1 v_2} \\
 \]
 
 \noindent
+Note that on the left side is our desired stationary variance covariance matrix between X and Y, containing unknown $c$. On the right 
+side we have the 
 
 
 
