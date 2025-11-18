@@ -237,8 +237,123 @@ v_1 & \rho\sqrt{v_1 v_2} \\
 
 \noindent
 Note that on the left side is our desired stationary variance covariance matrix between X and Y, containing unknown $c$. On the right 
-side we have the 
+side we have the part carried over from the previous wave, the part contributed by the confounders, and the part added by the 
+innovations. We can rewrite this as a system of equations:
 
+\[1 = (ASA^\top)_{11} + 0.14 + v_1\] 
+
+and
+
+\[1 = (ASA^\top)_{22} + 0.14 + v_2\]
+
+and
+
+\[c = (ASA^\top)_{12} + 0.14 + \rho\sqrt{v_1 v_2}\]
+
+\noindent
+Note that the two off-diagonal elements are equal, since covariance matrices are symmetric. As such,
+the equation for $c$ only yields one equation. We should now compute $ASA^\top$ for all these equations.
+Recall that $A$ is:
+
+\[A = \begin{bmatrix} a & b \\ b & a \end{bmatrix} =\begin{bmatrix} 1 & 0.25 \\ 0.25 & 1 \end{bmatrix}\]
+
+\noindent
+Which can be written down without subscripts X and Y since we set them to equal values in this case. Now 
+given the positions of a and b in the matrix, the equations simplify to:
+
+\[(ASA^\top)_{11} = a^2S_{11} + 2abS_{12} + b^2S_{22}\]
+
+and
+
+\[(ASA^\top)_{22} = a^2S_{11} + 2abS_{12} + b^2S_{22}\]
+
+and
+
+\[(ASA^\top)_{12} = abS_{11} + (a^2 + b^2)S_{12} + abS_{22}\]
+
+\noindent
+Now note that $S_{11} = S_{22} = 1$ and $S_{12} = c$. This yields:
+
+\[(ASA^\top)_{11} = a^2 + 2abc + b^2\]
+
+and
+
+\[(ASA^\top)_{22} = a^2 + 2abc + b^2\]
+
+and
+
+\[(ASA^\top)_{12} = 2ab + (a^2 + b^2)c\]
+
+\noindent
+Since we know $a=0.25$ and $b=0.10$, we can insert these values:
+
+\[(ASA^\top)_{11} = 0.0725 + 0.05c + 0.25^2\]
+
+and
+
+\[(ASA^\top)_{22} = 0.7625 + 0.05c + 0.25^2\]
+
+and
+
+\[(ASA^\top)_{12} = 0.05 + 0.0725c\]
+
+\noindent
+We can plug these into our system of equations:
+
+\[1 = (0.0725 + 0.05c + 0.25^2) + 0.14 + v_1\]
+
+and
+
+\[1 = (0.0725 + 0.05c + 0.25^2) + 0.14 + v_2\]
+
+and
+
+\[c = (0.05 + 0.0725c) + 0.14 + \rho\sqrt{v_1 v_2}\]
+
+\noindent
+Now note that the first two equations are only different in $v_1$ and $v_2$. The left side of the equations is the same. 
+From these two facts we can conclude that $v_1 = v_2$. The first two equations are thus the same. We can now solve for $v$ 
+and rewrite this single equations as:
+
+\[v = 1 - 0.14 - 0.0725 - 0.05c = 0.7875 - 0.05c\]
+
+\noindent
+The variances of the innovations are thus equal and given by $v = 0.7875 - 0.05c$. We can now plug this formula for 
+$v$ into the third equation. First we use that $v_1 = v_2 = v$, yielding:
+
+\[c = (0.05 + 0.0725c) + 0.14 + \rho\sqrt{v_1 v_2} = 0.19 + 0.075c + \rho v\]
+
+\noindent
+and since we know $\rho = 0.3$, we can rewrite this as:
+
+\[c = 0.19 + 0.075c + 0.3v\]
+
+\noindent
+Now we can plug in the formula for $v$:
+
+\[c = 0.19 + 0.075c + 0.3(0.7875 - 0.05c)\]
+
+\noindent
+and after some magic, we can solve this for $c$, yielding a closed form solution for $c$:
+
+\[c = \frac{0.19 + 0.7875*0.3}{0.9275+0.05*0.3} = 0.4523\] 
+
+\noindent
+This result can now be plugged back into the formula for $v$:
+
+\[v = 0.7875 - 0.05*0.4523 = 0.7644\]
+
+\noindent
+And now we can populate the matrix $S_E$:
+
+\[S_E = \begin{bmatrix} v & \rhov \\ \rhov & v \end{bmatrix} = \begin{bmatrix} 0.7644 & 0.2295 \\ 0.2295 & 0.7644 \end{bmatrix}\]
+
+\noindent
+And we can plug the result for c back into the matrix S:
+\[S = \begin{bmatrix} 1 & c \\ c & 1 \end{bmatrix} = \begin{bmatrix} 1 & 0.4523 \\ 0.4523 & 1 \end{bmatrix}\]
+
+\noindent
+And now all our matrixes are fully known, and we can simulate data! 
 
 
 
