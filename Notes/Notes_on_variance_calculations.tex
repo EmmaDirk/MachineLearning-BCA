@@ -454,7 +454,14 @@ c & 1
 \]
 
 \noindent
-And now all our matrices are fully known, and we can simulate data! 
+And now all our matrices are fully known, and we can simulate data! However, there is one more issue we need to tend to. 
+We want to make our system stationary, meaning $S$ is the same for each wave. If we have a look again at the factors
+contributing to the covariance between $X$ and $Y$, we see that there is the lagged relation, the confounder relation,
+and the innovations covariation. For the first measurement occasion, the lagge relation is zero. If we constrain the covariance
+between the innovations, and the confounder effects stay the same, we miss a covariance between X and Y. This is because
+all parts are constrained, so no covariance can be added, making the first occasion non-stationairy. Instead, we should free
+rho, or the correlation between the innovations for the first occasion, such that the covariance between X and Y can be added
+to make S stationary. 
 
 \end{document}
 
