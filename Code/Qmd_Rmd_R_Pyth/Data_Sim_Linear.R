@@ -221,17 +221,17 @@ describe(df)
 df_sample <- df[sample(1:nrow(df), 10000), ]
 
 # fit a linear regression between X at t=1 and Y at t=2
-lm_fit <- lm(y2 ~ x1, data = as.data.frame(df_sample))
+lm_fit <- lm(x1 ~ c1, data = as.data.frame(df_sample))
 
 # save the residuals
 residuals <- lm_fit$residuals
 
 # plot the residuals versus X1
-ggplot(df_sample, aes(x = x1, y = residuals)) +
+ggplot(df_sample, aes(x = c1, y = residuals)) +
   geom_point(alpha = 0.5) +
   geom_smooth(method = "loess", se = FALSE) +
   theme_minimal()
 
 # cache the data to the data folder
-write.csv(df, file = "Code/Data/Data_Sim_linear_Pop.csv", row.names = FALSE)
+# write.csv(df, file = "Code/Data/Data_Sim_linear_Pop.csv", row.names = FALSE)
 

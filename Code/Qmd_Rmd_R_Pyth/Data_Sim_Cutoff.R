@@ -3,14 +3,14 @@
 # X and Y are both affected by a number of confounding variables C, which have stable effects
 # over time as they represent time-invariant confounding variables, such as IQ. 
 # The data simulation model will have the following properties:
-
+#
 # 1. Each variable will have an innovation (or unexplained variance) such that the total variance of each variable is 1.
 # 2. Each variable will have a mean of 0. 
 # 3. The autoregressive effects will be set to 0.25 for both X and Y.
 # 4. The crossed lag-1 effect of X on Y will be set to 0.1.
 # 5. The confounding variables will have effects of 0.2 on X and 0.15 Y.
 # 6. The innovations will have residual correlations of 0.3 at each time-point, but not across time-points.
-
+#
 # Let's rephrase what we are doing here. We have got some knowns, because we specify them. They include the
 # effects matrix A, the effects matrix B and the variance matrix psi. We also know that the diagonal of S 
 # is supposed to be 1. This leaves us with 2 unknowns. We do not know the variance of the innovations, and we
@@ -37,16 +37,62 @@ by <- 0.10                                                 # effect of X_(t-1) o
 rho <- 0.30                                                # residual correlation of innovations
                                                           
 # create the path matrix A from these effects
-A <- matrix(c(ax, by, bx, ay), nrow=2, byrow=TRUE)
+A <- matrix(c(ax, by, 
+              bx, ay), 
+            nrow = 2, byrow = TRUE)
 
 ### confounder parameters ###
-k <- 3                                                     # number of confounders
-gamma_x <- c(0.30, 0.20, 0.10)                             # effect of confounders on X_t, where the first entry is the effect of confounder 1 on X_t, etc. 
-gamma_y <- c(0.30, 0.20, 0.10)                             # effect of confounders on Y_t, where the first entry is the effect of confounder 1 on Y_t, etc.
-tau2 <- c(1, 1, 1)                                         # variances of confounders
+k_lin <- 3                                                 # number of "linear" confounders (baseline C1..C3)
 
-B <- rbind(gamma_x, gamma_y)                               # create the path matrix B from these effects
-Psi  <- diag(tau2)                                         # variance-covariance matrix of confounders, which is just a k*k identity matrix since var=1 and cov=0
+# baseline linear effects of confounders on X_t and Y_t
+gamma_x_lin <- c(0.30, 0.20, 0.10)                         # effect of confounders on X_t
+gamma_y_lin <- c(0.30, 0.20, 0.10)                         # effect of confounders on Y_t
+
+# next we want to add a form of non-linearity. Namely a cutoff, beyond which confounders C
+# have strongly reduced or no *additional* effect on the variables X and Y.
+# First we need to specify the cutoff:
+thr <- 1                                                   # cutoff threshold for confounders (in SD units)
+
+# if we want (approximately) no slope beyond the threshold, we can subtract the entire linear effect:
+# gamma_x_cut is the effect of the "excess above the threshold" on X.
+# Note we could here have specified a percentage of the effect size instead of the entire effect size,
+# if we just wanted to change from one linear effect to a smaller linear effect.
+gamma_x_cut <- -gamma_x_lin                                # plateau for X above threshold
+gamma_y_cut <- -gamma_y_lin                                # plateau for Y above threshold
+
+# (set gamma_y_cut <- rep(0, k_lin) if you want only X to plateau and Y to stay linear)
+
+# now the actual total number of confounders is k_lin * 2, since we have the linear and the cutoff effects.
+# the number of "true exogenous" linear confounders is still k_lin, so we store this separately
+k <- k_lin * 2                                             # total number of confounder variables (C and cutoff versions)
+
+# we can now start simulating our exogenous linear confounders
+# we use the function rmvnorm to generate multivariate normal data
+Psi_base <- diag(rep(1, k_lin))                            # variance-covariance matrix of base confounders (I in this case)
+U_lin <- rmvnorm(N, 
+                 mean  = rep(0, k_lin),                    # mean of confounders = 0, since we want standardised effect sizes
+                 sigma = Psi_base)                         # C1..C3 ~ N(0,1), independent
+
+# and we can now create the cutoff confounders, where we apply the cutoff
+# by subtracting the threshold, and setting negative values to 0.
+# Basically, this variable is positive with the amount that the confounder exceeds the threshold.
+U_cut <- pmax(U_lin - thr, 0)                              # H_j = max(C_j - thr, 0)
+
+# now we can combine the linear and cutoff confounders into one matrix U
+# columns: first the k_lin linear confounders, then k_lin cutoff confounders
+U <- cbind(U_lin, U_cut)                                   # N x k, where k = 2 * k_lin
+
+# and empirically save their varcov matrix
+Psi <- cov(U)                                              # full covariance of (C, cutoff) confounders
+
+# now we update the effect vectors to include the effect sizes for the cutoff effects.
+# order of entries in gamma_x / gamma_y corresponds to the column order in U:
+# (C1, C2, C3, H1, H2, H3)
+gamma_x <- c(gamma_x_lin, gamma_x_cut)
+gamma_y <- c(gamma_y_lin, gamma_y_cut)
+
+# we can now build matrix B, which is 2 x k
+B <- rbind(gamma_x, gamma_y)
 
 ### varcov matrixes ###
 # we want the variance of each variable to be 1
@@ -56,14 +102,14 @@ S_target <- diag(2)                                        # since we have two v
 # the confounders are the only exogenous variables
 # and as such, we can calculate the variance that they contribute to each variable (or occasion of the variable) directly
 # which is simply the variance of the confounders*effect size 
-# psi contains their varcov matrix, and B contains the effect sizes. 
-# we use var(Ax) = A*var(x)*A' -> B*psi*B', and since psi=I, we get B*B'
-# however, if we wished to specify correlated confounders, we could do so by changing psi accordingly.
+# Psi contains their varcov matrix, and B contains the effect sizes. 
+# we use var(Ax) = A*var(x)*A' -> B*Psi*B'. Note that Psi != I here, since the cutoff creates 
+# covariance between the confounders (e.g. between C and H = max(C - thr, 0)).
 S_U  <- B %*% Psi %*% t(B)
 
 # now we want to specify a correlation rho between the innovations of X and Y.
 # which means the part that is not explained by the confounders or lagged relationships
-# still correlate with each other. Our job is to finjd out: given we specify a value rho,
+# still correlate with each other. Our job is to find out: given we specify a value rho,
 # denoting the correlation between the innovations of X and Y, what must the covariance between X and Y be,
 # while accounting for the covariance that is already induced by the confounders and the lagged relationships.
 # In one question: Given S_U, A and our desired rho, what must the covariance between X and Y be in order for
@@ -91,13 +137,13 @@ find_c <- function(A, S_U, rho) {
     Sigma_e_c <- S_dyn_c - t(A) %*% S_dyn_c %*% A
     
     # compute correlation of innovations
-    # the variation of innovations of X is v1
+    # the variance of innovations of X is v1
     v1 <- Sigma_e_c[1, 1]
-    # the variation of innovations of Y is v2
+    # the variance of innovations of Y is v2
     v2 <- Sigma_e_c[2, 2]
     # their covariance is cov12
     cov12 <- Sigma_e_c[1, 2]
-    #their correlation is then:
+    # their correlation is then:
     corr_e <- cov12 / sqrt(v1 * v2)
     
     # this is then the difference between the desired correlation and the actual correlation
@@ -105,9 +151,9 @@ find_c <- function(A, S_U, rho) {
   }
 
   # now this function f(c) should be zero when we have found the correct c
-  # as such we can look for the value of corr_e that makes f(c) = 0.
+  # as such we can look for the value of c that makes f(c) = 0.
   # Note that if the matrix A would be symmetric, then v1=v2, and we have
-  # a closed form solution for v. With two uknowns, we lack an equation and
+  # a closed form solution for v. With two unknowns, we lack an equation and
   # need to solve numerically. 
   uniroot(f, interval = c(-0.99, 0.99))$root
 }
@@ -137,12 +183,12 @@ eS[eS<1e-10]
 
 # now we need to compute the innovation covariance matrix.
 # we compute how much innovation variance we must add, such that the dynamic process is stationary. 
-# which means that the variance of X_t is and Y_t do not change over time.
-# read it like: how much innovation variance must we add such that the variance of each variable equals S_dynn. 
-# and remember that if the variance of the dynamic process equals S_dynn, then all our variablles have variances equal to S_target.
+# which means that the variance of X_t and Y_t do not change over time.
+# read it like: how much innovation variance must we add such that the variance of each variable equals S_dyn. 
+# and remember that if the variance of the dynamic process equals S_dyn, then all our variables have variances equal to S_target.
 # 1. X_t = A X_(t-1) + e_t
-# 2. for all variables: D_t = A'D_t-1 + e_t
-# 3. S_dynn = var(D_t) = A S_dynA' + S_e (Since var(X_t) = A^2 * var(X_t-1) + var(e_t))
+# 2. for all variables: D_t = A D_t-1 + e_t
+# 3. S_dyn = var(D_t) = A S_dyn A' + S_e (Since var(X_t) = A^2 * var(X_t-1) + var(e_t))
 # 4. solve for S_e: S_e = S_dyn - A S_dyn A'
 # note that this only works because the system is stationary! we can exclude the variance D_t receives directly from the confounders
 # since it is the same at every step, and the variance of the dynamic process is the same at every step. If this would not be the case
@@ -157,20 +203,14 @@ Sigma_e <- (Sigma_e + t(Sigma_e))/2
 Sigma_e1 <- S_dyn                             # because S_target = S_U + S_dyn
 Sigma_e1 <- (Sigma_e1 + t(Sigma_e1))/2
 
-# we can first generate our confounders, since they are exogenous
-# we use the function rmvnorm to generate multivariate normal data
-U <- rmvnorm(N, 
-  mean=rep(0, k),                             # mean of confounders = 0, since we want standardised effect sizes
-  sigma=Psi)                                  # variance-covariance matrix of confounders (I in this case)
-
 # now we can simulate the dynamic process data for X and Y
 # we add here the entire variance to each variable, so that is feed forward + innovations
 # these are only X1 and Y1, so they only have the direct confounder effects
 
 #  for t = 1: no lag yet, so Ddyn = e1 with Sigma_e1 ----
 Ddyn <- rmvnorm(N,                            
-  mean=c(0,0),                                # mean of the variables X and Y = 0, since we want standardised effect sizes
-  sigma=Sigma_e1)                             # dynamic part covariance for the first wave
+  mean  = c(0,0),                              # mean of the variables X and Y = 0, since we want standardised effect sizes
+  sigma = Sigma_e1)                            # dynamic part covariance for the first wave
 
 # initialise df with N rows and 2*T + k columns. 2*T for X and Y, k for confounders
 df <- matrix(NA, nrow = N, ncol = 2*T + k)
@@ -178,15 +218,15 @@ colnames(df) <- c(paste0("x", 1:T),
                   paste0("y", 1:T),
                   paste0("c", 1:k))
 
-# save the confounder
+# save the confounders (C1..Ck_lin followed by cutoff vars H1..Hk_lin)
 df[, (2*T + 1):(2*T + k)] <- U
 
 # we now add to the first wave X and Y the direct confounder effects
 # where we have our confounders (U) and the effect sizes (B)
 obs1 <- Ddyn + U %*% t(B)
 
-# we an store the first wave in our dataframe now
-df[, 1] <- obs1[, 1] 
+# we can store the first wave in our dataframe now
+df[, 1]    <- obs1[, 1] 
 df[, 1+T ] <- obs1[, 2]
 
 # a next wave can be simulated as:
@@ -204,10 +244,11 @@ for(i in 2:T){
   obs <- Ddyn + U %*% t(B) 
 
   # move the data to the dataframe
-  df[, i] <- obs[, 1] 
-  df[, i+T ] <- obs[, 2] }
+  df[, i]    <- obs[, 1] 
+  df[, i+T ] <- obs[, 2] 
+}
 
-# check that the variance of each variable are 1
+# check that the variance of each variable are 1 (approximately)
 round(apply(df, 2, var), 3)
 
 # check the varcov matrix
@@ -221,17 +262,16 @@ describe(df)
 df_sample <- df[sample(1:nrow(df), 10000), ]
 
 # fit a linear regression between X at t=1 and Y at t=2
-lm_fit <- lm(y2 ~ x1, data = as.data.frame(df_sample))
+lm_fit <- lm(x1 ~ c1, data = as.data.frame(df_sample))
 
 # save the residuals
 residuals <- lm_fit$residuals
 
 # plot the residuals versus X1
-ggplot(df_sample, aes(x = x1, y = residuals)) +
+ggplot(df_sample, aes(x = c1, y = residuals)) +
   geom_point(alpha = 0.5) +
   geom_smooth(method = "loess", se = FALSE) +
   theme_minimal()
 
 # cache the data to the data folder
-write.csv(df, file = "Code/Data/Data_Sim_linear_Pop.csv", row.names = FALSE)
-
+# write.csv(df, file = "Code/Data/Data_Sim_plateau_Pop.csv", row.names = FALSE)
