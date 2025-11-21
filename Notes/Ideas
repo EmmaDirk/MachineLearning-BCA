@@ -1,0 +1,8 @@
+### Idea 1 ###
+
+Note that if a confounder has the same non-linear effect on X as on Y, the effect of X on Y without any control remains linear. 
+
+### Idea 2 ###
+
+Note that every confounder must have a non-linear effect. Otherwise, an RI-CLPM can get rid of confounding on the linear relationship,
+breaking the third variable relationship. 
