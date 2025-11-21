@@ -41,14 +41,22 @@ U_lin <- rmvnorm(N,
                  sigma = Psi_base)
 
 # build sinusoidal transforms S_j = scaled sin(omega * C_j)
+# so each has mean ~0 and var ~1
+# we also remove the linear part of C_j from S_j, so no dependency remains between the two (orthogonalization).
+# this will later be useful to separate linear and non-linear effects
+# when we want to calculate a measure of non-linearity later.
 U_sin <- apply(U_lin, 2, function(col) {
 
-  # sinusoidal transform of each confounder
-  z <- sin(omega * col)
+  # raw sinusoidal transform of each confounder
+  z_raw <- sin(omega * col)
+
+  # remove the linear part of col (orthogonalize wrt the linear confounder)
+  z_perp <- resid(lm(z_raw ~ col))
 
   # scale the variables such that they have mean 0 and variance 1
-  as.numeric(scale(z, center = TRUE, scale = TRUE))      
+  as.numeric(scale(z_perp, center = TRUE, scale = TRUE))
 })
+
 
 # name the confounder columns to distinguish linear and sinusoidal parts
 colnames(U_lin) <- paste0("c", 1:k_lin)                    # C1, C2, C3

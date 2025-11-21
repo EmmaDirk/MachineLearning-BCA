@@ -6,3 +6,15 @@ Note that if a confounder has the same non-linear effect on X as on Y, the effec
 
 Note that every confounder must have a non-linear effect. Otherwise, an RI-CLPM can get rid of confounding on the linear relationship,
 breaking the third variable relationship. 
+
+### Idea 3 ###
+
+Step 1: choose a level of non-linearity, for example say we pick 3 or 5 levels of non-linearity. 
+Step 2: pick a number of confounders, for example 1 to 5 confounders.
+Step 3: for each confounder, randomly pick a type of nonlinearity from various options. 
+Step 4: randomly pick values for the confounder effects such that they fullfill the level of non-linerity chosen in step 1. This 
+        will result in one of many possible combinations of confounder effects that fullfill the level of non-linearity.
+Step 5: simulate data based on the these choices. 
+Step 6: fit models and evaluate performance.
+Step 7: repeat very often to get a 'representative' sample of possible confounder effect combinations.
+Step 8: repeat for various number of occasions and N and effect sizes of the CLPM. 

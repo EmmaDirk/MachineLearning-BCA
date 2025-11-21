@@ -67,13 +67,33 @@ Psi_base <- diag(tau2)
 # generate base confounders
 U_lin <- rmvnorm(N, mean = rep(0, k_lin), sigma = Psi_base)
 
-# make quadratics and cubics (deterministic transforms of U_lin)
-U_quad_raw  <- U_lin^2
-U_cubic_raw <- U_lin^3
+# generate the quadratic and cubic confounders
+# we orthogonalize them wrt the linear confounders
+# such that no linear dependency remains between them
+U_quad <- apply(U_lin, 2, function(col) {
 
-# standardize to mean 0, variance 1
-U_quad  <- scale(U_quad_raw)
-U_cubic <- scale(U_cubic_raw)
+  # raw quadratic transform of each confounder
+  z_raw  <- col^2
+
+  # remove the linear part of col (orthogonalize wrt the linear confounder)
+  z_perp <- resid(lm(z_raw ~ col))
+
+  # standardize to mean 0 and variance 1
+  as.numeric(scale(z_perp, center = TRUE, scale = TRUE))
+})
+
+# create cubic confounders
+U_cubic <- apply(U_lin, 2, function(col) {
+
+  # raw cubic transform of each confounder
+  z_raw  <- col^3
+
+  # remove the linear part of col (orthogonalize wrt the linear confounder)
+  z_perp <- resid(lm(z_raw ~ col))
+
+  # standardize to mean 0 and variance 1
+  as.numeric(scale(z_perp, center = TRUE, scale = TRUE))
+})
 
 # combine into full confounder matrix (N x k)
 U <- cbind(U_lin, U_quad, U_cubic)
