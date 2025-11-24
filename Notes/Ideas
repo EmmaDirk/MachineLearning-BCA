@@ -25,6 +25,7 @@ Step 8: repeat for various number of occasions and N and effect sizes of the CLP
 
 Each linear 'base' confounder should have multiple non-linear transformations. Adding various of these transformations can create complicated
 non-linearities, where the functional form is very difficult to rediscover. Let's call the number of different non-linear components we use
-the complexity of the nonlinearity. 
+the complexity of the nonlinearity. Note that this does not change anything whatsoever for the variance calculations, as these are all based 
+on the varcov matrix psi, which we can specify. 
 
 
