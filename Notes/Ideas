@@ -9,12 +9,22 @@ breaking the third variable relationship.
 
 ### Idea 3 ###
 
+Step 0: pick a confounding level: i.e. explained variance by the confounders 
 Step 1: choose a level of non-linearity, for example say we pick 3 or 5 levels of non-linearity. 
 Step 2: pick a number of confounders, for example 1 to 5 confounders.
 Step 3: for each confounder, randomly pick a type of nonlinearity from various options. 
 Step 4: randomly pick values for the confounder effects such that they fullfill the level of non-linerity chosen in step 1. This 
-        will result in one of many possible combinations of confounder effects that fullfill the level of non-linearity.
+        will result in one of many possible combinations of confounder effects that fullfill the level of non-linearity. Note that
+        This step must also consider the total confounding level chosen in step 0.
 Step 5: simulate data based on the these choices. 
 Step 6: fit models and evaluate performance.
 Step 7: repeat very often to get a 'representative' sample of possible confounder effect combinations.
 Step 8: repeat for various number of occasions and N and effect sizes of the CLPM. 
+
+### Idea 4 ### 
+
+Each linear 'base' confounder should have multiple non-linear transformations. Adding various of these transformations can create complicated
+non-linearities, where the functional form is very difficult to rediscover. Let's call the number of different non-linear components we use
+the complexity of the nonlinearity. 
+
+

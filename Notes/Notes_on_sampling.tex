@@ -1,0 +1,266 @@
+\documentclass{article}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}   
+
+\begin{document}
+
+\section*{Notes on sampling}
+What we want to be able to do, is to obtain an effects matrix $B$ of the confounders on variables $X$ and $Y$. Now these effect
+sizes should be chosen in a very particular way, to reflect how strongly the confounders affect the variables as a whole, and how
+much of that effect is caused by a non-linear component of the confounders. 
+
+\subsection*{Defining the parameters}
+We take a number of base confounders, which exert a linear effect on the variables $X$ and $Y$. We call this number $k_{\text{lin}}$. Now every confounder
+also has a number of non-linear components, which exert a non-linear effect on the variables $X$ and $Y$. We call the sum over the amount of these
+variables for all confounders $k_{\text{nonlin}}$. The total number of confounders is therefore $k = k_{\text{lin}} + k_{\text{nonlin}}$. In the derivations below we will
+first work this out for the case where each confounder has only one non-linear component. Later on we will extend this to multiple non-linear components.
+
+\noindent
+Now the $k$ confounders exert an effect on the variables $X$ and $Y$. These effects can be captured in the vectors:
+
+\[
+\gamma_{x} \in \mathbb{R}^k
+\]
+
+and
+
+\[
+\gamma_{y} \in \mathbb{R}^k
+\]
+
+\noindent
+meaning the entries to both vectors can take on any real number. Both vectors together can be written as
+
+\[
+\theta = (\gamma_{x}, \gamma_{y}) \in \mathbb{R}^{2k}.
+\]
+
+\noindent
+Now we constrain each coefficient to be between $0.01$ and $0.30$, since larger values seem unrealisitic and may lead to difficulties to get the system stationary.
+However, we could always opt for a larger upper bound if needed. We can summarise this with the following expression:
+
+\[
+\Theta = \{\, \theta = (\gamma_x, \gamma_y) : \gamma_x, \gamma_y \in [0.01, 0.30]^k \,\}.
+\]
+
+\subsection*{The influence of confounders}
+
+We can compute the total confounder induced variance in $X$ and $Y$ as follows: 
+
+\[
+S_U =
+\begin{pmatrix}
+\operatorname{Var}_X(U) & \operatorname{Cov}_{XY}(U) \\
+\operatorname{Cov}_{XY}(U) & \operatorname{Var}_Y(U)
+\end{pmatrix}
+=
+\begin{pmatrix}
+\sum_j \gamma_{xj}^2 & \sum_j \gamma_{xj}\gamma_{yj} \\
+\sum_j \gamma_{xj}\gamma_{yj} & \sum_j \gamma_{yj}^2
+\end{pmatrix}.
+\]
+
+\noindent
+Now when the confounders are standard normal and uncorrelated, we can simplify this to:
+
+\[
+\operatorname{Var}_X^U = \sum_{i=1}^{k} \gamma_{x,i}^2.
+\]
+
+\noindent
+Adding any covariances just complicates this calculation a little bit, but is not all that difficult. Now we can write the total influence of the 
+confounders as:
+
+\[
+S(\theta) = \sum_{i=1}^{k} \gamma_{x,i}^2 + \sum_{i=1}^{k} \gamma_{y,i}^2 = s_0.
+\]
+
+\noindent
+Where later on, we want to pick $s_0$. 
+
+\subsection*{Linear vs non-linear influence}
+Now we want to compute which part of this variance is attributable to a linear component, and which part is attributable to a non-linear component.
+This is a measure of non-linearity which falls between $0$ and $1$. We can partition our vectors of coefficients as follows:
+
+\[
+\gamma_x = (\gamma_{x,\text{lin}}, \gamma_{x,\text{nl}}) \qquad\qquad 
+\gamma_y = (\gamma_{y,\text{lin}}, \gamma_{y,\text{nl}})
+\]
+
+\noindent
+where the first $k_{\text{lin}}$ entries are the linear parts, and the last $k_{\text{nonlin}}$ entries are the non-linear parts. Now we can compute for both
+$X$ and $Y$ the non-linear part of the explained variance as:
+
+\[
+\eta_X(\theta)= \sum_{i=k_{\text{lin}}+1}^{k} \gamma_{x,i}^2 \qquad\qquad 
+\eta_Y(\theta) = \sum_{i=k_{\text{lin}}+1}^{k} \gamma_{y,i}^2.
+\]
+
+\noindent
+Then their average gives us the non-linear influence as:
+
+\[
+\eta(\theta) = \frac{\eta_X + \eta_Y}{2} = \eta_0.
+\]
+
+\noindent
+Where later we want to pick $\eta_0$.
+
+\subsection*{Sampling procedure}
+Now we can choose $\eta_0$ and $s_0$. We can also choose a number of linear confounders $k_{\text{lin}}$ and a number of 
+non-linear components $k_{\text{nonlin}}$. We can call the number of non-linear components per confounder the complexity of the nonlinearity. 
+As touched upon before, for now we will assume this complexity is $1$, meaning each confounder has exactly one non-linear component. Now
+there is a set of parameters $\theta$ which satisfy these constraints. We can call the set of solutions to these constraints:
+
+\[
+M = \{\, \theta \in \Theta : S(\theta) = s_0,\ \eta(\theta) = \eta_0 \,\}.
+\]
+
+\noindent
+Now the problem is, we do not know $M$, and as such we cannot sample from it. We can however sample from the set of all possible values in
+our $2k$-dimensional space $\Theta$. Now we do something called rejection sampling, where we sample from this space and check if the 
+constraints are met. If not, we reject the sample and sample again. Now, you might already see that this process will be incredibly inefficient,
+as picking a random sample from $\Theta$ will almost never satisfy the constraints. 
+
+There are some things we can do to make this process more efficient.
+First of all, we can make the constraints a little bit less strict, by allowing a small margin of error around the desired values. This will ``thicken''
+the set $M$ a little bit, making it more likely to hit a valid sample. Now, we also need to make sure that we pick our samples in a smarter way. In
+practice this means choosing one more constraint. We will choose to divide up $s_0$ evenly over $X$ and $Y$. This means we add the constraint:
+
+\[
+\operatorname{Var}_X^U = \operatorname{Var}_Y^U = \frac{s_0}{2}.
+\]
+
+\noindent
+Note that we could always choose a different way to divide up $s_0$ over $X$ and $Y$. We could each time also sample this division from a uniform distribution
+before picking any values from the space of the parameters. In this way we would generalise over different ways to divide up the confounder influence 
+over $X$ and $Y$. Note that we face a similar choice when dividing up $\eta_0$ over $X$ and $Y$. For now we will keep it simple and divide both evenly:
+
+\[
+\eta_X = \eta_Y = \eta_0.
+\]
+
+\noindent
+Now recall the equation for $\eta_X$:
+
+\[
+\eta_X = \frac{N_X}{L_X + N_X},
+\]
+
+\noindent
+which we can now rewrite as:
+
+\[
+N_X = \eta_0 (L_X + N_X).
+\]
+
+\noindent
+Now note that the total amount of variance $L_X + N_X$ is equal to $s_0/2$. Therefore we can rewrite this as:
+
+\[
+N_X = \eta_0 \frac{s_0}{2},
+\]
+
+and
+
+\[
+N_Y = \eta_0 \frac{s_0}{2},
+\]
+
+and
+
+\[
+L_X = (1 - \eta_0) \frac{s_0}{2},
+\]
+
+and
+
+\[
+L_Y = (1 - \eta_0) \frac{s_0}{2}.
+\]
+
+\noindent
+Now for each of these four quantities, we can calculate them using the sum of squares:
+
+\[
+L_X = \sum_{i=1}^{k_{\text{lin}}} \gamma_{x,\text{lin},i}^2,
+\]
+
+\[
+L_Y = \sum_{i=1}^{k_{\text{lin}}} \gamma_{y,\text{lin},i}^2,
+\]
+
+\[
+N_X = \sum_{i=1}^{k_{\text{nonlin}}} \gamma_{x,\text{nl},i}^2,
+\]
+
+\[
+N_Y = \sum_{i=1}^{k_{\text{nonlin}}} \gamma_{y,\text{nl},i}^2.
+\]
+
+\noindent
+Now this is where we can do something smart. We want to draw a random vector from any symmetric distribution, such that the sum of squares of the entries:
+
+\[
+u^{x,\text{lin}} \in \mathbb{R}^{k_{\text{lin}}},
+\]
+
+\noindent
+we normalize this vector such that:
+
+\[
+\sum_{i=1}^{k_{\text{lin}}} (u^{x,\text{lin}}_i)^2 = 1,
+\]
+
+\noindent
+and then we set:
+
+\[
+\gamma_{x,\text{lin},i} = \sqrt{L_X}\, u^{x,\text{lin}}_i,
+\]
+
+\noindent
+which fulfills the constraint $L_X = \sum_{i=1}^{k_{\text{lin}}} \gamma_{x,\text{lin},i}^2$.  
+
+We can do the same for the non-linear confounders:
+
+\[
+u^{x,\text{nl}} \in \mathbb{R}^{k_{\text{nonlin}}},
+\]
+
+\noindent
+normalize:
+
+\[
+\sum_{i=1}^{k_{\text{nonlin}}} (u^{x,\text{nl}}_i)^2 = 1,
+\]
+
+\noindent
+and set:
+
+\[
+\gamma_{x,\text{nl},i} = \sqrt{N_X}\, u^{x,\text{nl}}_i,
+\]
+
+\noindent
+which fulfills the constraint $N_X = \sum_{i=1}^{k_{\text{nonlin}}} \gamma_{x,\text{nl},i}^2$.
+
+We can do the same for $Y$. Now we also wanted our samples to fall
+within the range between $0.01$ and $0.30$. We can simply check this after sampling and reject any samples that do not fall within this range.
+
+To recap in words, we:
+
+\begin{itemize}
+    \item Choose $k_{\text{lin}}$, $k_{\text{nonlin}}$, $s_0$ and $\eta_0$
+    \item Sample four random vectors from a symmetric distribution: $u^{x,\text{lin}}$, $u^{x,\text{nl}}$, $u^{y,\text{lin}}$, $u^{y,\text{nl}}$
+    \item Normalize these vectors to have sum of squares equal to $1$
+    \item Scale these vectors to have sum of squares equal to their respective budgets
+    \item Combine these vectors to form $\gamma_x$ and $\gamma_y$
+    \item Check if all entries of $\gamma_x$ and $\gamma_y$ fall within $[0.01, 0.30]$. If not, reject and start over.
+\end{itemize}
+
+\end{document}
+
+% pdflatex Notes_on_sampling.tex 
+% Remove-Item "*.aux","*.log","*.toc","*.out","*.synctex.gz" -Force
