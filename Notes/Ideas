@@ -28,4 +28,8 @@ non-linearities, where the functional form is very difficult to rediscover. Let'
 the complexity of the nonlinearity. Note that this does not change anything whatsoever for the variance calculations, as these are all based 
 on the varcov matrix psi, which we can specify. 
 
+### Idea 5 ###   
+One point about the model fitting procedure is that it changes when we differ the number of base confounders as well as the number of time-points. 
+As scuh, we should make a function that adapts to the input given the number of time-points and number of base confounders. 
+
 

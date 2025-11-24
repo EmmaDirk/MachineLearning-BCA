@@ -278,4 +278,4 @@ ggplot(df_sample, aes(x = c1, y = residuals)) +
 
 # we will run this script various times using different effect sizes to produce
 # multiple datasets with different magnitudes of non-linearity. 
-write.csv(df, file = "Code/Data/Data_Sim_Cubic_0.10_Pop.csv", row.names = FALSE)
+write.csv(df, file = "Thesis/Code/Data/Data_Sim_Cubic_Pop.csv", row.names = FALSE)

@@ -233,5 +233,5 @@ ggplot(df_sample, aes(x = c1, y = residuals)) +
   theme_minimal()
 
 # cache the data to the data folder
-# write.csv(df, file = "Code/Data/Data_Sim_linear_Pop.csv", row.names = FALSE)
+write.csv(df, file = "Thesis/Code/Data/Data_Sim_linear_Pop.csv", row.names = FALSE)
 

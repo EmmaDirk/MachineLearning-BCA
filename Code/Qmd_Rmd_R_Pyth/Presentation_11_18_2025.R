@@ -1,186 +1,66 @@
-library(tidyverse)
-library(ranger)
-library(lavaan)
+# =========================================================
+# Libraries
+# =========================================================
+library(tidyverse)   # dplyr, ggplot2, purrr, tibble, readr, etc.
+library(ranger)      # random forest (for residuals)
+library(lavaan)      # SEM (clpm / riclpm / dpm)
+library(parallel)    # detectCores()
+library(doParallel)  # registerDoParallel()
+library(knitr)       # kable() for the table
+library(xgboost)     # XGBoost
+library(glmnet)      # LASSO
 
-# parallel processing
-library(parallel)
-library(doParallel)
+set.seed(123)
 
-cl <- makeCluster(detectCores() - 1)
-registerDoParallel(cl)
+# =========================================================
+# Helper: extract a specific effect from lavaan fit
+# =========================================================
+extract_effect <- function(fit, model_type, data_type, lhs, rhs) {
+  pe <- parameterEstimates(fit, standardized = TRUE, ci = TRUE)
 
-# reading data
-linear    <- read.csv("C:/Users/Admin/Desktop/UU/Thesis/Code/Data/Data_Sim_linear_Pop.csv")
-cubic_10  <- read.csv("C:/Users/Admin/Desktop/UU/Thesis/Code/Data/Data_Sim_Cubic_0.10_Pop.csv")
-cubic_18  <- read.csv("C:/Users/Admin/Desktop/UU/Thesis/Code/Data/Data_Sim_Cubic_0.18_Pop.csv")
-cubic_41  <- read.csv("C:/Users/Admin/Desktop/UU/Thesis/Code/Data/Data_Sim_Cubic_0.41_Pop.csv")
-cubic_89  <- read.csv("C:/Users/Admin/Desktop/UU/Thesis/Code/Data/Data_Sim_Cubic_0.89_Pop.csv")
+  row <- pe %>%
+    dplyr::filter(lhs == !!lhs, op == "~", rhs == !!rhs)
 
-# take samples of each dataset
-slinear <- linear %>% sample_n(2000)
-scubic_10 <- cubic_10 %>% sample_n(2000)
-scubic_18 <- cubic_18 %>% sample_n(2000)
-scubic_41 <- cubic_41 %>% sample_n(2000)
-scubic_89 <- cubic_89 %>% sample_n(2000)
-
-# regress x1 on c1
-mod_lin     <- lm(x1 ~ c1, data = slinear)
-mod_cub_10  <- lm(x1 ~ c1, data = scubic_10)
-mod_cub_18  <- lm(x1 ~ c1, data = scubic_18)
-mod_cub_41  <- lm(x1 ~ c1, data = scubic_41)
-mod_cub_89  <- lm(x1 ~ c1, data = scubic_89)
-
-# add residuals as columns in the data
-slinear$resid    <- resid(mod_lin)
-scubic_10$resid  <- resid(mod_cub_10)
-scubic_18$resid  <- resid(mod_cub_18)
-scubic_41$resid  <- resid(mod_cub_41)
-scubic_89$resid  <- resid(mod_cub_89)
-
-# plot residuals versus predictor
-ggplot(slinear, aes(x = c1, y = resid)) +
-  geom_point(alpha = 0.5) +
-  geom_smooth(method = "loess", se = FALSE) +
-  theme_minimal() +
-  ggtitle("Linear")
-
-ggplot(scubic_10, aes(x = c1, y = resid)) +
-  geom_point(alpha = 0.5) +
-  geom_smooth(method = "loess", se = FALSE) +
-  theme_minimal() +
-  ggtitle("Cubic 0.10")
-
-ggplot(scubic_18, aes(x = c1, y = resid)) +
-  geom_point(alpha = 0.5) +
-  geom_smooth(method = "loess", se = FALSE) +
-  theme_minimal() +
-  ggtitle("Cubic 0.18")
-
-ggplot(scubic_41, aes(x = c1, y = resid)) +
-  geom_point(alpha = 0.5) +
-  geom_smooth(method = "loess", se = FALSE) +
-  theme_minimal() +
-  ggtitle("Cubic 0.41")
-
-ggplot(scubic_89, aes(x = c1, y = resid)) +
-  geom_point(alpha = 0.5) +
-  geom_smooth(method = "loess", se = FALSE) +
-  theme_minimal() +
-  ggtitle("Cubic 0.89")
-
-# take samples of each dataset
-linear <- linear %>% sample_n(10000)
-cubic_10 <- cubic_10 %>% sample_n(10000)
-cubic_18 <- cubic_18 %>% sample_n(10000)
-cubic_41 <- cubic_41 %>% sample_n(10000)
-cubic_89 <- cubic_89 %>% sample_n(10000)
-# linear
-lm_lin_x1 <- lm(x1 ~ c1 + c2 + c3, data = linear)
-lm_lin_x2 <- lm(x2 ~ c1 + c2 + c3, data = linear)
-lm_lin_x3 <- lm(x3 ~ c1 + c2 + c3, data = linear)
-lm_lin_x4 <- lm(x4 ~ c1 + c2 + c3, data = linear)
-lm_lin_x5 <- lm(x5 ~ c1 + c2 + c3, data = linear)
-
-# cubic_10
-lm_cub10_x1 <- lm(x1 ~ c1 + c2 + c3, data = cubic_10)
-lm_cub10_x2 <- lm(x2 ~ c1 + c2 + c3, data = cubic_10)
-lm_cub10_x3 <- lm(x3 ~ c1 + c2 + c3, data = cubic_10)
-lm_cub10_x4 <- lm(x4 ~ c1 + c2 + c3, data = cubic_10)
-lm_cub10_x5 <- lm(x5 ~ c1 + c2 + c3, data = cubic_10)
-
-# cubic_18
-lm_cub18_x1 <- lm(x1 ~ c1 + c2 + c3, data = cubic_18)
-lm_cub18_x2 <- lm(x2 ~ c1 + c2 + c3, data = cubic_18)
-lm_cub18_x3 <- lm(x3 ~ c1 + c2 + c3, data = cubic_18)
-lm_cub18_x4 <- lm(x4 ~ c1 + c2 + c3, data = cubic_18)
-lm_cub18_x5 <- lm(x5 ~ c1 + c2 + c3, data = cubic_18)
-
-# cubic_41
-lm_cub41_x1 <- lm(x1 ~ c1 + c2 + c3, data = cubic_41)
-lm_cub41_x2 <- lm(x2 ~ c1 + c2 + c3, data = cubic_41)
-lm_cub41_x3 <- lm(x3 ~ c1 + c2 + c3, data = cubic_41)
-lm_cub41_x4 <- lm(x4 ~ c1 + c2 + c3, data = cubic_41)
-lm_cub41_x5 <- lm(x5 ~ c1 + c2 + c3, data = cubic_41)
-
-# cubic_89
-lm_cub89_x1 <- lm(x1 ~ c1 + c2 + c3, data = cubic_89)
-lm_cub89_x2 <- lm(x2 ~ c1 + c2 + c3, data = cubic_89)
-lm_cub89_x3 <- lm(x3 ~ c1 + c2 + c3, data = cubic_89)
-lm_cub89_x4 <- lm(x4 ~ c1 + c2 + c3, data = cubic_89)
-lm_cub89_x5 <- lm(x5 ~ c1 + c2 + c3, data = cubic_89)
-
-# linear
-linear <- linear %>%
-  mutate(
-    res_lm_x1 = resid(lm_lin_x1),
-    res_lm_x2 = resid(lm_lin_x2),
-    res_lm_x3 = resid(lm_lin_x3),
-    res_lm_x4 = resid(lm_lin_x4),
-    res_lm_x5 = resid(lm_lin_x5)
-  )
-
-# cubic_10
-cubic_10 <- cubic_10 %>%
-  mutate(
-    res_lm_x1 = resid(lm_cub10_x1),
-    res_lm_x2 = resid(lm_cub10_x2),
-    res_lm_x3 = resid(lm_cub10_x3),
-    res_lm_x4 = resid(lm_cub10_x4),
-    res_lm_x5 = resid(lm_cub10_x5)
-  )
-
-# cubic_18
-cubic_18 <- cubic_18 %>%
-  mutate(
-    res_lm_x1 = resid(lm_cub18_x1),
-    res_lm_x2 = resid(lm_cub18_x2),
-    res_lm_x3 = resid(lm_cub18_x3),
-    res_lm_x4 = resid(lm_cub18_x4),
-    res_lm_x5 = resid(lm_cub18_x5)
-  )
-
-# cubic_41
-cubic_41 <- cubic_41 %>%
-  mutate(
-    res_lm_x1 = resid(lm_cub41_x1),
-    res_lm_x2 = resid(lm_cub41_x2),
-    res_lm_x3 = resid(lm_cub41_x3),
-    res_lm_x4 = resid(lm_cub41_x4),
-    res_lm_x5 = resid(lm_cub41_x5)
-  )
-
-# cubic_89
-cubic_89 <- cubic_89 %>%
-  mutate(
-    res_lm_x1 = resid(lm_cub89_x1),
-    res_lm_x2 = resid(lm_cub89_x2),
-    res_lm_x3 = resid(lm_cub89_x3),
-    res_lm_x4 = resid(lm_cub89_x4),
-    res_lm_x5 = resid(lm_cub89_x5)
-  )
-
-# function to add ranger residuals
-add_ranger_residuals <- function(df) {
-  xs <- paste0("x", 1:5)
-
-  for (x in xs) {
-    f <- as.formula(paste0(x, " ~ c1 + c2 + c3"))
-    mod <- ranger(f, data = df, num.trees = 100)  # reduce trees for speed if you like
-
-    preds <- predict(mod, data = df)$predictions
-    df[[paste0("res_rg_", x)]] <- df[[x]] - preds
+  if (nrow(row) == 0) {
+    return(tibble::tibble(
+      model_type = model_type,
+      data_type  = data_type,
+      lhs        = lhs,
+      rhs        = rhs,
+      est        = NA_real_,
+      se         = NA_real_,
+      z          = NA_real_,
+      pvalue     = NA_real_,
+      ci_lower   = NA_real_,
+      ci_upper   = NA_real_,
+      std_est    = NA_real_
+    ))
   }
 
-  df
+  row <- row[1, ]
+
+  tibble::tibble(
+    model_type = model_type,
+    data_type  = data_type,
+    lhs        = lhs,
+    rhs        = rhs,
+    est        = row$est,
+    se         = row$se,
+    z          = row$z,
+    pvalue     = row$pvalue,
+    ci_lower   = row$ci.lower,
+    ci_upper   = row$ci.upper,
+    std_est    = row$std.all
+  )
 }
 
-linear_rg    <- add_ranger_residuals(linear)
-cubic_10_rg  <- add_ranger_residuals(cubic_10)
-cubic_18_rg  <- add_ranger_residuals(cubic_18)
-cubic_41_rg  <- add_ranger_residuals(cubic_41)
-cubic_89_rg  <- add_ranger_residuals(cubic_89)
+# =========================================================
+# Model specifications
+# =========================================================
 
-# ri-clpm model specification
+# -------------------------------------------------
+# RI-CLPM model specification
+# -------------------------------------------------
 model_riclpm <- "
 rix =~ 1*x1 + 1*x2 + 1*x3 + 1*x4 + 1*x5
 riy =~ 1*y1 + 1*y2 + 1*y3 + 1*y4 + 1*y5
@@ -216,7 +96,9 @@ x1 + x2 + x3 + x4 + x5 ~ mx*1
 y1 + y2 + y3 + y4 + y5 ~ my*1
 "
 
-# dpm model specification
+# -------------------------------------------------
+# DPM model specification
+# -------------------------------------------------
 model_dpm <- "
 fx =~ 1*x2 + 1*x3 + 1*x4 + 1*x5
 fy =~ 1*y2 + 1*y3 + 1*y4 + 1*y5
@@ -262,7 +144,9 @@ y4 ~ 1
 y5 ~ 1
 "
 
-# clpm model specification
+# -------------------------------------------------
+# CLPM model specification
+# -------------------------------------------------
 model_clpm <- "
 x2 + y2 ~ x1 + y1
 x3 + y3 ~ x2 + y2
@@ -298,85 +182,174 @@ y4 ~ 1
 y5 ~ 1
 "
 
-# fit a "normal" CLPM model to all data
-fit_clpm_linear <- sem(model_clpm,
-                       data = linear,
-                       missing = "fiml",
-                       estimator = "mlr")
+# =========================================================
+# Read data (6 datasets)
+# =========================================================
+linear      <- read_csv("C:/Users/Admin/Desktop/UU/Thesis umbrella/Thesis/Code/Data/Data_Sim_linear_Pop.csv")
+cubic       <- read_csv("C:/Users/Admin/Desktop/UU/Thesis umbrella/Thesis/Code/Data/Data_Sim_cubic_Pop.csv")
+exponential <- read_csv("C:/Users/Admin/Desktop/UU/Thesis umbrella/Thesis/Code/Data/Data_Sim_exponential_Pop.csv")
+sine        <- read_csv("C:/Users/Admin/Desktop/UU/Thesis umbrella/Thesis/Code/Data/Data_Sim_Sin_Pop.csv")
+tanh        <- read_csv("C:/Users/Admin/Desktop/UU/Thesis umbrella/Thesis/Code/Data/Data_Sim_tanh_Pop.csv")
+plateau     <- read_csv("C:/Users/Admin/Desktop/UU/Thesis umbrella/Thesis/Code/Data/Data_Sim_plateau_Pop.csv")
 
-fit_clpm_cubic_10 <- sem(model_clpm,
-                         data = cubic_10,
-                         missing = "fiml",
-                         estimator = "mlr")
+data_list <- list(
+  linear      = linear,
+  cubic       = cubic,
+  exponential = exponential,
+  sine        = sine,
+  tanh        = tanh,
+  plateau     = plateau
+)
 
-fit_clpm_cubic_18 <- sem(model_clpm,
-                         data = cubic_18,
-                         missing = "fiml",
-                         estimator = "mlr")
+# =========================================================
+# Small samples (n=2000) for residual plots: x1 ~ c1
+# =========================================================
+sample_small <- lapply(data_list, function(df) dplyr::sample_n(df, 2000))
 
-fit_clpm_cubic_41 <- sem(model_clpm,
-                         data = cubic_41,
-                         missing = "fiml",
-                         estimator = "mlr")
+sample_small <- lapply(sample_small, function(df) {
+  mod <- lm(x1 ~ c1, data = df)
+  df$resid <- resid(mod)
+  df
+})
 
-fit_clpm_cubic_89 <- sem(model_clpm,
-                         data = cubic_89,
-                         missing = "fiml",
-                         estimator = "mlr")
+purrr::imap(sample_small, ~ {
+  ggplot(.x, aes(x = c1, y = resid)) +
+    geom_point(alpha = 0.5) +
+    geom_smooth(method = "loess", se = FALSE) +
+    theme_minimal() +
+    ggtitle(.y)
+})
 
-# fit an RI-CLPM model to all data
-fit_riclpm_linear <- sem(model_riclpm,
-                         data = linear,
-                         missing = "fiml",
-                         estimator = "mlr")
+# =========================================================
+# Big samples (n=10000)
+# =========================================================
+data_big <- lapply(data_list, function(df) dplyr::sample_n(df, 10000))
 
-fit_riclpm_cubic_10 <- sem(model_riclpm,
-                           data = cubic_10,
-                           missing = "fiml",
-                           estimator = "mlr")
+# =========================================================
+# Residualizers: LM, tuned ranger, tuned XGBoost, LASSO
+# =========================================================
 
-fit_riclpm_cubic_18 <- sem(model_riclpm,
-                           data = cubic_18,
-                           missing = "fiml",
-                           estimator = "mlr")
+# ---------------- LM residuals --------------------
+add_lm_residuals <- function(df) {
+  xs <- paste0("x", 1:5)
+  for (x in xs) {
+    f <- as.formula(paste0(x, " ~ c1 + c2 + c3"))
+    mod <- lm(f, data = df)
+    df[[paste0("res_lm_", x)]] <- resid(mod)
+  }
+  df
+}
 
-fit_riclpm_cubic_41 <- sem(model_riclpm,
-                           data = cubic_41,
-                           missing = "fiml",
-                           estimator = "mlr")
+# -------------- Ranger residuals (tuned) ----------
+add_ranger_residuals <- function(df) {
+  xs <- paste0("x", 1:5)
 
-fit_riclpm_cubic_89 <- sem(model_riclpm,
-                           data = cubic_89,
-                           missing = "fiml",
-                           estimator = "mlr")
+  for (x in xs) {
+    f <- as.formula(paste0(x, " ~ c1 + c2 + c3"))
 
-# fit a DPM model to all data
-fit_dpm_linear <- sem(model_dpm,
-                      data = linear,
-                      missing = "fiml",
-                      estimator = "mlr")
+    mtry_grid     <- 1:3
+    min_node_grid <- c(1, 5, 10)
+    best_err      <- Inf
+    best_model    <- NULL
 
-fit_dpm_cubic_10 <- sem(model_dpm,
-                        data = cubic_10,
-                        missing = "fiml",
-                        estimator = "mlr")
+    for (mtry_val in mtry_grid) {
+      for (min_node in min_node_grid) {
+        mod_tmp <- ranger(
+          formula        = f,
+          data           = df,
+          num.trees      = 200,
+          mtry           = mtry_val,
+          min.node.size  = min_node,
+          importance     = "none",
+          respect.unordered.factors = "order"
+        )
 
-fit_dpm_cubic_18 <- sem(model_dpm,
-                        data = cubic_18,
-                        missing = "fiml",
-                        estimator = "mlr")
+        err <- mod_tmp$prediction.error
 
-fit_dpm_cubic_41 <- sem(model_dpm,
-                        data = cubic_41,
-                        missing = "fiml",
-                        estimator = "mlr")
+        if (!is.null(err) && err < best_err) {
+          best_err   <- err
+          best_model <- mod_tmp
+        }
+      }
+    }
 
-fit_dpm_cubic_89 <- sem(model_dpm,
-                        data = cubic_89,
-                        missing = "fiml",
-                        estimator = "mlr")
+    preds <- predict(best_model, data = df)$predictions
+    df[[paste0("res_rg_", x)]] <- df[[x]] - preds
+  }
 
-# Fit a CLPM to all linear residual data
+  df
+}
+
+# -------------- XGBoost residuals (tuned) ---------
+add_xgb_residuals <- function(df) {
+  xs <- paste0("x", 1:5)
+  X  <- as.matrix(df[, c("c1", "c2", "c3")])
+
+  for (x in xs) {
+    y      <- df[[x]]
+    dtrain <- xgboost::xgb.DMatrix(data = X, label = y)
+
+    cv <- xgboost::xgb.cv(
+      data       = dtrain,
+      nrounds    = 200,
+      nfold      = 5,
+      early_stopping_rounds = 10,
+      objective  = "reg:squarederror",
+      metrics    = "rmse",
+      verbose    = 0
+    )
+
+    best_nrounds <- cv$best_iteration
+
+    mod <- xgboost::xgboost(
+      data      = dtrain,
+      objective = "reg:squarederror",
+      nrounds   = best_nrounds,
+      max_depth = 3,
+      eta       = 0.1,
+      verbose   = 0
+    )
+
+    preds <- predict(mod, newdata = X)
+    df[[paste0("res_xgb_", x)]] <- y - preds
+  }
+
+  df
+}
+
+# -------------- LASSO residuals (cv.glmnet) -------
+add_lasso_residuals <- function(df) {
+  xs <- paste0("x", 1:5)
+  X  <- model.matrix(~ c1 + c2 + c3, data = df)[, -1, drop = FALSE]
+
+  for (x in xs) {
+    y <- df[[x]]
+
+    fit <- glmnet::cv.glmnet(
+      x      = X,
+      y      = y,
+      alpha  = 1,
+      family = "gaussian"
+    )
+
+    preds <- predict(fit, newx = X, s = "lambda.min")[, 1]
+    df[[paste0("res_lasso_", x)]] <- y - preds
+  }
+
+  df
+}
+
+# =========================================================
+# Apply residualizers
+# =========================================================
+data_big_lm    <- lapply(data_big, add_lm_residuals)
+data_big_rg    <- lapply(data_big, add_ranger_residuals)
+data_big_xgb   <- lapply(data_big, add_xgb_residuals)
+data_big_lasso <- lapply(data_big, add_lasso_residuals)
+
+# =========================================================
+# Build SEM-ready datasets for each residual type
+# =========================================================
 make_lm_residual_data <- function(df) {
   df %>%
     transmute(
@@ -392,12 +365,6 @@ make_lm_residual_data <- function(df) {
       y5 = y5
     )
 }
-
-linear_lm_dat   <- make_lm_residual_data(linear)
-cubic10_lm_dat  <- make_lm_residual_data(cubic_10)
-cubic18_lm_dat  <- make_lm_residual_data(cubic_18)
-cubic41_lm_dat  <- make_lm_residual_data(cubic_41)
-cubic89_lm_dat  <- make_lm_residual_data(cubic_89)
 
 make_rg_residual_data <- function(df) {
   df %>%
@@ -415,166 +382,102 @@ make_rg_residual_data <- function(df) {
     )
 }
 
-linear_rg_dat   <- make_rg_residual_data(linear_rg)
-cubic10_rg_dat  <- make_rg_residual_data(cubic_10_rg)
-cubic18_rg_dat  <- make_rg_residual_data(cubic_18_rg)
-cubic41_rg_dat  <- make_rg_residual_data(cubic_41_rg)
-cubic89_rg_dat  <- make_rg_residual_data(cubic_89_rg)
+make_xgb_residual_data <- function(df) {
+  df %>%
+    transmute(
+      x1 = res_xgb_x1,
+      x2 = res_xgb_x2,
+      x3 = res_xgb_x3,
+      x4 = res_xgb_x4,
+      x5 = res_xgb_x5,
+      y1 = y1,
+      y2 = y2,
+      y3 = y3,
+      y4 = y4,
+      y5 = y5
+    )
+}
 
-# fit CLPM to lm residual data
-fit_clpm_lm_linear <- sem(model_clpm,
-                           data = linear_lm_dat,
-                           missing = "fiml",
-                           estimator = "mlr")
+make_lasso_residual_data <- function(df) {
+  df %>%
+    transmute(
+      x1 = res_lasso_x1,
+      x2 = res_lasso_x2,
+      x3 = res_lasso_x3,
+      x4 = res_lasso_x4,
+      x5 = res_lasso_x5,
+      y1 = y1,
+      y2 = y2,
+      y3 = y3,
+      y4 = y4,
+      y5 = y5
+    )
+}
 
-fit_clpm_lm_cubic_10 <- sem(model_clpm,
-                             data = cubic10_lm_dat,
-                             missing = "fiml",
-                             estimator = "mlr")
+data_lm_sem    <- lapply(data_big_lm,    make_lm_residual_data)
+data_rg_sem    <- lapply(data_big_rg,    make_rg_residual_data)
+data_xgb_sem   <- lapply(data_big_xgb,   make_xgb_residual_data)
+data_lasso_sem <- lapply(data_big_lasso, make_lasso_residual_data)
 
-fit_clpm_lm_cubic_18 <- sem(model_clpm,
-                             data = cubic18_lm_dat,
-                             missing = "fiml",
-                             estimator = "mlr")
+# =========================================================
+# Fit CLPM, RI-CLPM, DPM on all datasets
+# =========================================================
+fit_all <- function(model_syntax, data_list) {
+  lapply(data_list, function(df) {
+    sem(
+      model_syntax,
+      data      = df,
+      missing   = "fiml",
+      estimator = "mlr"
+    )
+  })
+}
 
-fit_clpm_lm_cubic_41 <- sem(model_clpm,
-                             data = cubic41_lm_dat,
-                             missing = "fiml",
-                             estimator = "mlr")
+# Raw data
+fit_clpm_raw   <- fit_all(model_clpm,   data_big)
+fit_riclpm_raw <- fit_all(model_riclpm, data_big)
+fit_dpm_raw    <- fit_all(model_dpm,    data_big)
 
-fit_clpm_lm_cubic_89 <- sem(model_clpm,
-                             data = cubic89_lm_dat,
-                             missing = "fiml",
-                             estimator = "mlr")
+# CLPM on residualized data
+fit_clpm_lm    <- fit_all(model_clpm, data_lm_sem)
+fit_clpm_rg    <- fit_all(model_clpm, data_rg_sem)
+fit_clpm_xgb   <- fit_all(model_clpm, data_xgb_sem)
+fit_clpm_lasso <- fit_all(model_clpm, data_lasso_sem)
 
-# fit CLPM to ranger residual data
-fit_clpm_rg_linear <- sem(model_clpm,
-                          data = linear_rg_dat,
-                          missing = "fiml",
-                          estimator = "mlr")
-
-fit_clpm_rg_cubic_10 <- sem(model_clpm,
-                            data = cubic10_rg_dat,
-                            missing = "fiml",
-                            estimator = "mlr")
-
-fit_clpm_rg_cubic_18 <- sem(model_clpm,
-                            data = cubic18_rg_dat,
-                            missing = "fiml",
-                            estimator = "mlr")
-
-fit_clpm_rg_cubic_41 <- sem(model_clpm,
-                            data = cubic41_rg_dat,
-                            missing = "fiml",
-                            estimator = "mlr")
-
-fit_clpm_rg_cubic_89 <- sem(model_clpm,
-                            data = cubic89_rg_dat,
-                            missing = "fiml",
-                            estimator = "mlr")
-
-extract_effect <- function(fit, model_type, data_type, lhs, rhs) {
-  pe <- parameterEstimates(fit, standardized = TRUE, ci = TRUE)
-  
-  row <- pe %>% 
-    filter(lhs == !!lhs, op == "~", rhs == !!rhs)
-  
-  if (nrow(row) == 0) {
-    return(tibble(
-      model_type = model_type,
-      data_type  = data_type,
-      lhs        = lhs,
-      rhs        = rhs,
-      est        = NA_real_,
-      se         = NA_real_,
-      z          = NA_real_,
-      pvalue     = NA_real_,
-      ci_lower   = NA_real_,
-      ci_upper   = NA_real_,
-      std_est    = NA_real_
-    ))
-  }
-  
-  row <- row[1, ]
+# =========================================================
+# Collect fits into a single tibble
+# =========================================================
+collect_fits <- function(fit_list, model_type) {
   tibble(
+    fit        = fit_list,
     model_type = model_type,
-    data_type  = data_type,
-    lhs        = lhs,
-    rhs        = rhs,
-    est        = row$est,
-    se         = row$se,
-    z          = row$z,
-    pvalue     = row$pvalue,
-    ci_lower   = row$ci.lower,
-    ci_upper   = row$ci.upper,
-    std_est    = row$std.all
+    data_type  = names(fit_list)
   )
 }
 
-# ---------------------------------------------
-# list all models + which parameter to extract
-# ---------------------------------------------
-fits_info <- tibble::tibble(
-  fit = list(
-    # CLPM on raw data
-    fit_clpm_linear,
-    fit_clpm_cubic_10,
-    fit_clpm_cubic_18,
-    fit_clpm_cubic_41,
-    fit_clpm_cubic_89,
-    # RI-CLPM (within-person effect wy2 ~ wx1)
-    fit_riclpm_linear,
-    fit_riclpm_cubic_10,
-    fit_riclpm_cubic_18,
-    fit_riclpm_cubic_41,
-    fit_riclpm_cubic_89,
-    # DPM (y2 ~ x1)
-    fit_dpm_linear,
-    fit_dpm_cubic_10,
-    fit_dpm_cubic_18,
-    fit_dpm_cubic_41,
-    fit_dpm_cubic_89,
-    # CLPM on lm residuals
-    fit_clpm_lm_linear,
-    fit_clpm_lm_cubic_10,
-    fit_clpm_lm_cubic_18,
-    fit_clpm_lm_cubic_41,
-    fit_clpm_lm_cubic_89,
-    # CLPM on ranger residuals
-    fit_clpm_rg_linear,
-    fit_clpm_rg_cubic_10,
-    fit_clpm_rg_cubic_18,
-    fit_clpm_rg_cubic_41,
-    fit_clpm_rg_cubic_89
-  ),
-  model_type = c(
-    rep("clpm_raw",       5),
-    rep("riclpm_raw",     5),
-    rep("dpm_raw",        5),
-    rep("clpm_lm_resid",  5),
-    rep("clpm_rg_resid",  5)
-  ),
-  data_type = rep(c("linear", "cubic_10", "cubic_18", "cubic_41", "cubic_89"), 5),
-  # which lhs and rhs correspond to "x1 -> y2"
-  lhs = c(
-    rep("y2",  5),  # CLPM raw
-    rep("wy2", 5),  # RI-CLPM within-person: wy2 ~ wx1
-    rep("y2",  5),  # DPM
-    rep("y2",  5),  # CLPM on lm residuals
-    rep("y2",  5)   # CLPM on ranger residuals
-  ),
-  rhs = c(
-    rep("x1",  5),
-    rep("wx1", 5),
-    rep("x1",  5),
-    rep("x1",  5),
-    rep("x1",  5)
+fits_info <- bind_rows(
+  collect_fits(fit_clpm_raw,   "clpm_raw"),
+  collect_fits(fit_riclpm_raw, "riclpm_raw"),
+  collect_fits(fit_dpm_raw,    "dpm_raw"),
+  collect_fits(fit_clpm_lm,    "clpm_lm_resid"),
+  collect_fits(fit_clpm_rg,    "clpm_rg_resid"),
+  collect_fits(fit_clpm_xgb,   "clpm_xgb_resid"),
+  collect_fits(fit_clpm_lasso, "clpm_lasso_resid")
+) %>%
+  mutate(
+    lhs = dplyr::case_when(
+      model_type == "riclpm_raw" ~ "wy2",
+      TRUE                       ~ "y2"
+    ),
+    rhs = dplyr::case_when(
+      model_type == "riclpm_raw" ~ "wx1",
+      TRUE                       ~ "x1"
+    )
   )
-)
 
-# ---------------------------------------------
-# extract x1 -> y2 effect from all models
-# ---------------------------------------------
+# =========================================================
+# Extract x1 -> y2 effects from all models
+# =========================================================
 effects_x1_y2 <- purrr::pmap_dfr(
   .l = list(
     fit        = fits_info$fit,
@@ -586,26 +489,29 @@ effects_x1_y2 <- purrr::pmap_dfr(
   .f = extract_effect
 )
 
-# nicely formatted tibble
 effects_x1_y2_tbl <- effects_x1_y2 %>%
   arrange(model_type, data_type) %>%
-  select(model_type, data_type, lhs, rhs,
-         est, se, z, pvalue, ci_lower, ci_upper, std_est)
+  select(
+    model_type, data_type, lhs, rhs,
+    est, se, z, pvalue, ci_lower, ci_upper, std_est
+  )
 
 effects_x1_y2_tbl
 
-# optional: pretty table for Quarto / R Markdown
 effects_x1_y2_tbl %>%
   knitr::kable(
-    digits = 3,
-    caption = "Estimated cross-lagged effect x1 → y2 across models"
+    digits  = 3,
+    caption = "Estimated cross-lagged effect x1 → y2 across models and datasets"
   )
 
+# =========================================================
+# Bias calculation and plot
+# =========================================================
 true_value <- 0.1
 
 bias_tbl <- effects_x1_y2_tbl %>%
   mutate(
-    bias = est - true_value,
+    bias       = est - true_value,
     model_type = factor(model_type),
     data_type  = factor(data_type)
   )
@@ -615,25 +521,25 @@ bias_summary <- bias_tbl %>%
   summarise(
     mean_bias = mean(bias, na.rm = TRUE),
     sd_bias   = sd(bias, na.rm = TRUE),
-    .groups = "drop"
+    .groups   = "drop"
   )
 
-ggplot(bias_tbl,
-       aes(x = model_type,
-           y = bias,
-           fill = data_type,
-           color = data_type)) +
-
-  # boxplots: bias distribution
+ggplot(
+  bias_tbl,
+  aes(
+    x     = model_type,
+    y     = bias,
+    fill  = data_type,
+    color = data_type
+  )
+) +
   geom_boxplot(
-    position = position_dodge(width = 0.8),
-    alpha = 0.4,
+    position      = position_dodge(width = 0.8),
+    alpha         = 0.4,
     outlier.shape = NA
   ) +
-
-  # mean ± sd per (model_type, data_type)
   geom_errorbar(
-    data = bias_summary,
+    data        = bias_summary,
     inherit.aes = FALSE,
     aes(
       x    = model_type,
@@ -641,29 +547,26 @@ ggplot(bias_tbl,
       ymax = mean_bias + sd_bias,
       color = data_type
     ),
-    width = 0.15,
-    position = position_dodge(width = 0.8),
+    width     = 0.15,
+    position  = position_dodge(width = 0.8),
     linewidth = 0.6
   ) +
-
   geom_point(
-    data = bias_summary,
+    data        = bias_summary,
     inherit.aes = FALSE,
     aes(
-      x = model_type,
-      y = mean_bias,
+      x     = model_type,
+      y     = mean_bias,
       color = data_type
     ),
-    size = 2.8,
+    size     = 2.8,
     position = position_dodge(width = 0.8)
   ) +
-
   geom_hline(yintercept = 0, linetype = "dashed") +
-
   labs(
     title = "Bias of x1 → y2 across model and data types",
-    x = "Model type",
-    y = "Bias (estimate − 0.1)",
+    x     = "Model type",
+    y     = "Bias (estimate − 0.1)",
     color = "Data type",
     fill  = "Data type"
   ) +

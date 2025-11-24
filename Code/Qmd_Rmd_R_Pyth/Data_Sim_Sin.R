@@ -203,3 +203,6 @@ ggplot(df_sample, aes(x = c1, y = residuals)) +
   geom_point(alpha = 0.5) +
   geom_smooth(method = "loess", se = FALSE) +
   theme_minimal()
+
+# write out the data
+write.csv(df, file = "Thesis/Code/Data/Data_Sim_Sin_Pop.csv", row.names = FALSE)

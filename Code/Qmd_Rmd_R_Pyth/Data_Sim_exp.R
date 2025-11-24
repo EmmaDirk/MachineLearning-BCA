@@ -205,4 +205,4 @@ ggplot(df_sample, aes(x = c1, y = residuals)) +
   theme_minimal()
 
 # cache the data to the data folder if desired
-# write.csv(df, file = "Code/Data/Data_Sim_exponential_Pop.csv", row.names = FALSE)
+write.csv(df, file = "Thesis/Code/Data/Data_Sim_exponential_Pop.csv", row.names = FALSE)
