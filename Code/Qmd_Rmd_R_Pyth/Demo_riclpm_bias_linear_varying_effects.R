@@ -10,6 +10,7 @@ library(mvtnorm)
 library(psych)
 library(lavaan)
 library(tidyverse)
+library(xgboost)
 
 ### ----------------------------------------------------------
 ### MODEL PARAMETERS
