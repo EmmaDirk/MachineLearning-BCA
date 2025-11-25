@@ -261,7 +261,8 @@ add_ranger_residuals <- function(df) {
           mtry           = mtry_val,
           min.node.size  = min_node,
           importance     = "none",
-          respect.unordered.factors = "order"
+          respect.unordered.factors = "order",
+          num.threads    = parallel::detectCores() - 1
         )
 
         err <- mod_tmp$prediction.error
@@ -296,7 +297,8 @@ add_xgb_residuals <- function(df) {
       early_stopping_rounds = 10,
       objective  = "reg:squarederror",
       metrics    = "rmse",
-      verbose    = 0
+      verbose    = 0,
+      num.threads    = parallel::detectCores() - 1
     )
 
     best_nrounds <- cv$best_iteration
@@ -307,7 +309,8 @@ add_xgb_residuals <- function(df) {
       nrounds   = best_nrounds,
       max_depth = 3,
       eta       = 0.1,
-      verbose   = 0
+      verbose   = 0,
+      num.threads    = parallel::detectCores() - 1
     )
 
     preds <- predict(mod, newdata = X)
@@ -329,7 +332,8 @@ add_lasso_residuals <- function(df) {
       x      = X,
       y      = y,
       alpha  = 1,
-      family = "gaussian"
+      family = "gaussian",
+      num.threads    = parallel::detectCores() - 1
     )
 
     preds <- predict(fit, newx = X, s = "lambda.min")[, 1]
