@@ -32,4 +32,28 @@ on the varcov matrix psi, which we can specify.
 One point about the model fitting procedure is that it changes when we differ the number of base confounders as well as the number of time-points. 
 As scuh, we should make a function that adapts to the input given the number of time-points and number of base confounders. 
 
+### Idea 6 ###
+
+What is the problem? 
+
+Problem:  We have a baseline confounder biasing our effects. 
+Solution: We can use a RI-CLPM to control for this confounder, without even observing it! 
+Problem:  The baseline confounder has a different effect at different time-points, such that the differences between persons are not stable.
+Solution: We can regress the variables onto the observed confounder linearly, and add the residuals to a RI-CLPM.
+Problem:  The confounder has a non-linear effect on X and Y, such that regressing out the confounder linearly does not work.
+Solution: We use a ML algorithm to learn the non-linear effects of the confounder on X and Y, and use the residuals in a CLPM! 
+
+### Idea 7 ### 
+The RI-CLPM works well when the process that creates the between-person differences is stable over time. We can vary the degree to which this is 
+true. The effect of e.g. age on job offers might change slightly as markets change with it. However, crisis events like COVID might produce a sharp
+change in the effects of a covariate. We should simulate one such shift of the effects. 
+
+### Idea 8 ###
+We want to add variance to the effects of C on X and Y over time. We will do this by picking the deviation from the previous effect
+from a normal distribution. The variance off that determines just how unstable the effects are over time. We can specify a mean trend 
+if we would like to produce some overall drift in a certain direction. 
+
+Now the effect of the mean vector is clear, but how would changing variances affect our approaches?
+- RI-CLPM: predictions for one point where the variance is larger (further from the other occasions) would get more biased. 
+- BCA linear: would not be affected, as adjustment is done seperately for each time-point. 
 
