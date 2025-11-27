@@ -57,3 +57,10 @@ Now the effect of the mean vector is clear, but how would changing variances aff
 - RI-CLPM: predictions for one point where the variance is larger (further from the other occasions) would get more biased. 
 - BCA linear: would not be affected, as adjustment is done seperately for each time-point. 
 
+### Idea 9 ###    
+One of the core things to think about when it comes to simulating time-varying data is that we want the process to be stable over time.
+The issue is that random walks can create non-stationary processes. I want to use random walks though, as they are much more realistic as
+compared to picking some random values w.r.t. the base confounder effects. One thing we do is to use perturbation based changes, such 
+that our variances do not blow up. A second thing we could try to implement is that we compute how much variance can be added by the confounders
+as a maximum, and then if we hit the maximum, anything sampled above the maximum is set to the maximum.
+
