@@ -64,3 +64,7 @@ compared to picking some random values w.r.t. the base confounder effects. One t
 that our variances do not blow up. A second thing we could try to implement is that we compute how much variance can be added by the confounders
 as a maximum, and then if we hit the maximum, anything sampled above the maximum is set to the maximum.
 
+### Idea 10 ### 
+When simulating data with only 2 time-points, the bias seems to not depend on the variance of the parameters at all. Is this because the 
+RI-CLPM can always fit a perfect line through 2 points, no matter what the variance is?
+
