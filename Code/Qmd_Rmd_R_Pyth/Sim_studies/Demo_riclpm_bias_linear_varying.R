@@ -8,8 +8,6 @@ library(dplyr)
 library(ggplot2)
 library(parallel)
 
-
-
 ############################################################
 ##  Simulation function with SHRINK PARAMETER
 ##  Now returns both df and B_list
@@ -224,8 +222,6 @@ extract_crosslags_riclpm <- function(fit, T){
   out
 }
 
-
-
 ############################################################
 ##  run_one: bias, est_mean, sd_B, mean_B, NA indicator
 ############################################################
@@ -313,13 +309,11 @@ run_one <- function(var_value, rep_id,
   )
 }
 
-
-
 ############################################################
 ##  Main simulation wrapper
 ############################################################
 
-run_full_bias_variance_windows <- function(
+run_full_bias_variance <- function(
   var_list          = seq(0.001, 0.15, by=0.001),
   reps              = 200,
   N                 = 10000,
@@ -472,8 +466,6 @@ run_full_bias_variance_windows <- function(
   )
 }
 
-
-
 ############################################################
 ##  Shrinkage sweep over variances:
 ##  x = variance, y = NA rate, color = shrinkage
@@ -505,7 +497,7 @@ run_shrinkage_sweep <- function(
         for (v in variance_values) {
 
             out <- tryCatch(
-                run_full_bias_variance_windows(
+                run_full_bias_variance(
                     var_list          = v,
                     reps              = reps,
                     N                 = N,
@@ -551,38 +543,37 @@ run_shrinkage_sweep <- function(
     list(results = results, plot = p)
 }
 
-
-
 ############################################################
 ##  EXAMPLE RUNS (commented)
 ############################################################
 
 ### Example 1: Basic variance sweep at one shrinkage
-# out <- run_full_bias_variance_windows(
-#   var_list     = seq(0.001, 0.05, by=0.005),
-#   reps         = 40,
-#   N            = 8000,
-#   T            = 5,
-#   shrink_param = 0.10,
-#   cores        = 6
-# )
-# out$plot_bias
-# out$plot_coef
-# out$plot_na
-# out$plot_sd_B
-# out$plot_mean_B
-# out$runtime
-# out$summary
-
+ out <- run_full_bias_variance(
+   var_list     = seq(0.001, 0.20, by=0.001),
+   reps         = 1000,
+   N            = 10000,
+   T            = 5,
+   shrink_param = 0.20,
+   cores        = 7
+ )
+ out$plot_bias
+ out$plot_coef
+ out$plot_na
+ out$plot_sd_B
+ out$plot_mean_B
+ out$runtime
+ out$summary
 
 ### Example 2: Shrinkage sweep (multiple lines)
- sweep_res <- run_shrinkage_sweep(
-   variance_values = seq(0.005, 0.15, by = 0.01),
-   shrink_vals     = seq(0, 0.4, by = 0.1),
-   reps            = 30,
-   N               = 8000,
+sweep_res <- run_shrinkage_sweep(
+   variance_values = seq(0.001, 0.15, by = 0.001),
+   shrink_vals     = seq(0, 0.5, by = 0.1),
+   reps            = 50,
+   N               = 10000,
    T               = 5,
-   cores           = 6
+   cores           = 7
  )
  sweep_res$plot
+
+
 
