@@ -1,11 +1,13 @@
 ---
 title: "Research Rapport Results"
-format: html
+format:
+  html:
+    css: style.css
 ---
 
 This document will produce all the figures and tables that will be used in the research rapport. It also will serve as a compilation of all code that has been written thus far. 
 
-# 1. Purpose
+# 1. Purpose + proceedings
 The purpose of this thesis is twofold. First, it aims to show the shortcomings of current methods and second it aims to propose a new method that overcomes these shortcomings:
 
 1. We first need to show that current SOTA methods such as the RI-CLPM and the DPM are not equipped to handle baseline confounding effects that change over time. 
@@ -16,6 +18,436 @@ We need to run two simulation studies to show these points. The first simulation
 ## 1.1 Conditions
 There are various simulation conditions that need to be considered. Note that for this study, we will not vary all conditions, but focus on defining the problem and providing a proof of concept for our proposed solution. We will briefly consider the following conditions:
 
-* 
+* 1.1.1 Type of time-varying effect 
+* 1.1.2 Strength of confounding effect (and covariation among the confounders)
+* 1.1.3 Sample size
+* 1.1.4 Number of occasions
+* 1.1.5 The values of the cross-lagged effects, auto-regressive effects, and residual correlations
+* 1.1.6 Type of the non-linear effect (only for study 2)
+* 1.1.7 Ammount of non-linearity (only for study 2)
+* 1.1.8 Methods used 
 
+### 1.1.1 Type of time-varying effect
+There are various ways in which an effect can change over time. Some of these are more realistic than others. For this simulation study, we will consider the following types of time-varying effects:
+
+* Constant over time (i.e., no time-varying effect). This will serve as the baseline condition.
+* Linear increase/decrease over time. At every occasion, a constant c is added/subtracted to/from the effect. For example, the effect of age on social media (or genAI) use might decrease over the years as it is integrated into daily use more. 
+* Circular/sinusoidal effect over time. At every occasion, the effect of the confounder increases and decreases in a sinusoidal pattern. For example, the effect of the weather on mood might follow a seasonal pattern.
+* Stepwise effect over time. A change in effects at a specific occasion due to some one-off event. E.g. the effect of age on social media usage changes drastically after COVID-19 lockdowns.
+* Random walk. The effect is drawn from a normal distribution centered around the previous occasion. As such, effects will slowly drift into a direction over time, for example due to societal changes (concept drift). 
+
+In order to determine how much variation there is between the occasions, it would be neat to have some measure of variation. For example, we could calculate the standard deviation of the effects across occasions. This would give us an idea of how much the effects vary over time. Then, we could use this measure to determine make sure all conditions have similar levels of variation.
+
+### 1.1.2 Strength of confounding effect
+Confounders affect the variables of interest (X and Y). These variables receive an ammount of variance from the confounders. Since the variance of each variable is 1, this variance can be calculated from the regression coefficients directly. This is useful, because we can make all scenarios have the same level of confounding by ensuring that the R squared of the confounders on X and Y is the same across conditions. For the research rapport, we will consider only 1 level of confounding, but later this may be changed. We can calculate the variance received from the confounders as follows:
+
+$$ 
+R^2 = B \Psi B^T = B I B^T = B B^T,
+$$
+
+Where $B$ is the matrix of effects of the confounders on X and Y, and $\Psi$ is the covariance matrix of the confounders (which is the identity matrix if the confounders are uncorrelated and have variance 1). Note that we could choose to make the confounders correlated, but for the research rapport we will assume them uncorrelated. Also note that (as will be elaborated upon later) the non-linear parts of each confounder will be orthogonalised w.r.t. their linear 'parent' meaning the covariance between the linear and non-linear component is 0. We can use the following script to determine the strength of the confounding effects from the matrix $B$:
+
+```{r confounder strength function}
+
+# function to calculate the strength of confounding effects
+# from the matrix B, which holds the effects of the confounders on X and Y
+# where rows = X, Y and columns = confounders
+confounder_strength <- function(B) {
+  
+  # check if the input is a matrix with 2 rows (for X and Y)
+  if (!is.matrix(B) || nrow(B) != 2) {
+    stop("B must be a 2 x k matrix (rows = X, Y; columns = confounders).")
+  }
+  
+  # with Psi = I, S_U = B %*% t(B)
+  S_U <- B %*% t(B)
+  
+  # extract variances and covariance
+  var_X <- S_U[1, 1]
+  var_Y <- S_U[2, 2]
+  cov_XY <- S_U[1, 2]
+  
+  # save results in a list
+  list(
+    S_U   = S_U,
+    var_X = var_X,
+    var_Y = var_Y,
+    cov_XY = cov_XY
+  )
+}
+
+```
+
+### 1.1.3 Sample size
+We will choose various sample sizes that range from small (i.e. 50-100), to large (1000-5.000), to population level (1000000+). This is important for two reasons. 
+
+1. The first is that at small sample sizes, estimation of some models may show much greater variability. This is problematic, since estimates may be correct on average, but we are in a scenario where they are not very often. This is especially important when using machine learning methods, since these often require larger sample sizes to perform well.
+2. The second is that we would like to see how well the methods perform at population level. This is important, since we would like to see that the methods converge to the true values when sample size increases.
+3. An extra bonus point is that sample sizes heavily influence computational time. This is important both for the CLPMS and the machine learning methods.
+
+For this research report, we will consider only a sample size of 1000. 
+
+### 1.1.4 Number of occasions
+The number of occasions influences our problem in three ways:
+
+1. More points mean less information per point. This means that we need a larger sample size to get stable estimates.
+2. More points mean more opportunity for time-varying effects to change. This means that we might see more bias the further in time we go from the baseline. 
+3. This in turn means that our added variance will increase, which potentially causes the stationarity equation to fail. 
+
+For this research report, we will consider only 5 occasions.
+
+### 1.1.5 Cross-lagged & auto-regressive effects + residual correlations
+It is important to pick realistic values for the substantively interesting parameters. Usually, the autoregressive effect is larger than the cross-lagged effect, and lies somewhere around 0.2-0.3. The cross lagged effects themselves are usually smaller, around 0.1-0.2. The residual correlations are usually quite large, and lie around 0.2-0.3. They refer to confounders that affect both variables at one time-point, but not across time, such as the weather. We will not vary these parameters over conditions in the research rapport. 
+
+### 1.1.6 Type of the non-linear effect (only for study 2)
+We will consider various types of non-linear effects from the confounders on the variables of interest. All of the types used for the research rapport will be generated in the following way:
+
+1. Generate the linear components of the confounders as standard normal variables.
+2. Generate the non-linear components of the confounders by applying a non-linear transformation to the linear conponent
+3. Orthogonalise the non-linear component w.r.t. the linear component to ensure that they are uncorrelated. It will become apparent later why this is important.
+
+We have chosen to add the following four kinds of non-linear transformations here:
+
+* Exponential: $f(x) = exp(x)$
+* Quadratic: $f(x) = x^2$ + Cubic: $f(x) = x^3$
+* Sine: $f(x) = sin(x)$
+* Tanh: $f(x) = tanh(x)$
+
+These forms were chosen because they allow for independence of their linear component without messing up the interpretation of that linear component. There are some forms of non-linearity very common in the social sciences that are to be added for the final thesis, which are not included here for the research rapport. We will add these forms later, but these require special attention as they cannot be orthogonalised w.r.t. their linear component without messing up the interpretation of that linear component. Examples are:
+
+* piecewise linear functions (threshold effects)
+* interactions (two-way, three-way, etc.)
+
+Below are some plots visualising each type of non-linearity used in this study. 
+
+```{r visualising non-linearity, echo=FALSE, message=FALSE, warning=FALSE}
+
+# libraries
+library(ggplot2)
+library(patchwork)
+
+# reproducibility
+set.seed(123)
+
+# generate x
+n  <- 200
+x  <- seq(-3, 3, length.out = n)
+
+# data for each plot
+df_exp <- data.frame(
+  x = x,
+  y = exp(x) + rnorm(n, 0, 0.3),
+  fn = "Exponential"
+)
+
+df_qc <- data.frame(
+  x = x,
+  y = x^2 + x^3 + rnorm(n, 0, 2),
+  fn = "Quadratic + Cubic"
+)
+
+df_sin <- data.frame(
+  x = x,
+  y = sin(x) + rnorm(n, 0, 0.1),
+  fn = "Sine"
+)
+
+df_tanh <- data.frame(
+  x = x,
+  y = tanh(x) + rnorm(n, 0, 0.05),
+  fn = "Tanh"
+)
+
+# assign a distinct color per plot
+plot_colors <- c(
+  "Exponential"       = "#1f77b4",
+  "Quadratic + Cubic" = "#d62728",
+  "Sine"              = "#2ca02c",
+  "Tanh"              = "#9467bd"
+)
+
+# plot maker
+make_plot <- function(data, title) {
+  ggplot(data, aes(x, y)) +
+    geom_point(color = plot_colors[unique(data$fn)], alpha = 0.5, size = 1.3) +
+    geom_smooth(method = "lm", se = FALSE, color = "black", linewidth = 0.9) +
+    theme_minimal(base_size = 12) +
+    labs(title = title, x = "", y = "")
+}
+
+p1 <- make_plot(df_exp,  "Exponential")
+p2 <- make_plot(df_qc,   "Quadratic + Cubic")
+p3 <- make_plot(df_sin,  "Sine")
+p4 <- make_plot(df_tanh, "Tanh")
+
+# combine in a 2×2 grid
+(p1 | p2) /
+(p3 | p4)
+
+```
+
+### 1.1.7 Ammount of non-linearity (only for study 2)
+Even though we have various forms of non-linearity, we would like the ammount of non-linearity between functions to be comparable. Lucklily, we can straightforwardly calculate the ammount of variance that is explained by the non-linear component of each confounder as $B B^T$, where $B$ is the matrix of effects of the non-linear components of the confounders on X and Y. We can then compute the R squared values for the linear component and the non-linear component separately. This is done so easily, because the linear components and the non-linear components are orthogonalised w.r.t. each other. Now we can compute the measure of non-linearity as follows:
+
+$$
+\eta = \frac{R^2_{non-linear}}{R^2_{linear} + R^2_{non-linear}},
+$$
+
+where the total variance explained can be denoted by $s$. We can append a subscript $t$ to denote the explained variance per occasion. Our general measure of non-linearity across all occasions can then be computed as:
+
+$$
+\eta_{t} =\frac{R^2_{non-linear, t}}{R^2_{linear, t} + R^2_{non-linear, t}},
+$$ 
+
+We can also define an R function to compute the non-linearity index $\eta$ from the matrix $B$:
+
+```{r non-linearity index function}
+
+# this function computes the non-linearity index eta
+nonlinearity_index <- function(B, k_lin) {
+  
+  # check B structure
+  if (!is.matrix(B) || nrow(B) != 2) {
+    stop("B must be a 2 × k matrix (rows = X, Y).")
+  }
+  
+  # split into linear and nonlinear parts
+  B_lin <- B[, 1:k_lin, drop = FALSE]
+  B_nl  <- B[, (k_lin + 1):ncol(B), drop = FALSE]
+  
+  # variance using same logic as confounder_strength()
+  get_var <- function(v) {
+    as.numeric(v %*% v)
+  }
+  
+  # X variances (row 1)
+  var_X_lin <- get_var(B_lin[1, ])
+  var_X_nl  <- get_var(B_nl[1, ])
+  
+  # Y variances (row 2)
+  var_Y_lin <- get_var(B_lin[2, ])
+  var_Y_nl  <- get_var(B_nl[2, ])
+  
+  # nonlinearity proportions
+  eta_X <- var_X_nl / (var_X_lin + var_X_nl)
+  eta_Y <- var_Y_nl / (var_Y_lin + var_Y_nl)
+  
+  # return mean nonlinearity
+  mean(c(eta_X, eta_Y))
+}
+
+```
+
+### 1.1.8 Methods used
+We will consider four classic models:
+
+* The standard CLPM, where we do not model baseline confounders explicitly.
+* The RI-CLPM, where we do not model baseline confounders explictly. 
+* The DPM, where we do not model baseline confounders explicitly.
+* The standard CLPM with linear adjustment per occasion.
+
+In addition, we will consider models that residualise the variables of interest w.r.t. the confounders per occasion using various machine learning methods. These methods include:
+
+* Linear regression (equivalent to linear adjustment per occasion).
+* Lasso Regression.
+* Random Forests (Ranger).
+* Bayesian Additive Rregression trees (BART).
+* Extreme Gradient Boosting (XGBoost).
+* Optional: TabPFN.
+
+After residualising, we will fit a standard CLPM to the residualised variables.
+
+### 1.1.9 Conditions table
+All in all, we can construct the following conditions table for study 1: 
+
+```{r conditions table 1, echo=FALSE, message=FALSE, warning=FALSE}
+
+library(kableExtra)
+
+df <- data.frame(
+  Scenario = paste("Scenario", 1:5),
+  `Varying effect` = c("None", "Linear", "Stepwise", "Sinusoidal", "Random walk"),
+  `CLPM` = "✓",
+  `RI-CLPM` = "✓",
+  `DPM` = "✓",
+  `CLPM + Linear Adj.` = "✓"
+)
+
+kbl(
+  df,
+  booktabs = TRUE,
+  caption = "Conditions table study 1",
+  caption_placement = "bottom"
+) |>
+  kable_styling(full_width = FALSE)
+
+```
+
+Note that here the models are not true conditions, as they do not influence the data generation process. They are rather different methods to analyse the same data. We now move on to the conditions table for study 2, which omits the methods used here for brevity. The methods are applied to each condition in the same way as in study 1, now including the residualisation methods as well. 
+
+```{r conditions table 2, echo=FALSE, message=FALSE, warning=FALSE}
+
+library(kableExtra)
+
+df <- data.frame(
+  Scenario = paste("Scenario", 1:5),
+  `Varying effect` = c("None", "Linear", "Stepwise", "Sinusoidal", "Random walk"),
+  `NL = 0.1` = "✓",
+  `NL = 0.25` = "✓",
+  `NL = 0.5` = "✓"
+)
+
+kbl(
+  df,
+  booktabs = TRUE,
+  caption = "Conditions table study 2: NL abbreviates non-linearity index",
+  caption_placement = "bottom"
+) |>
+  kable_styling(full_width = FALSE)
+
+```
+
+All variables that are not mentioned in the conditions table are held constant across conditions. Namely:
+
+* Cross-lagged effects ($a_{xy}$): 0.1
+* Auto-regressive effects ($b_{xy}$): 0.2
+* Residual correlations ($\rho$): 0.15
+* Sample size ($N$): 1000
+* Number of occasions ($T$): 5
+* Strength of confounding effects at baseline ($s_0$): 0.25 for both X and Y
+* Standard deviation of confounding effects over time: 0.1
+* Number of linear confounders: 3
+* Number of non-linear components per confounder: 1
+
+## 1.2 Performance metrics
+For the evaluation of our methods we will look at the following performance metrics:
+
+* Relative bias: the deviation from the true value relative to the true value.
+* Empirical standard error: the standard deviation of the estimates across replications.
+* Coverage: the proportion of replications where the confidence interval contains the true value.
+* Convergence: the proportion of replications where the model converged successfully.
+
+## 1.3 Sampling beta matrices 
+We have defined the number of confounders, their level of confounding and their level of non-linearity. However, we still run to an issue here. We can simply pick coefficients for the confounders that satisfy these conditions, but results would not be very general. Instead, we could also come up with a function that samples random coefficients that satisfy these conditions. Note that because all of our confounders are generated in the same way, we can feed the same beta-matrix into all simulation functions. 
+
+Sampling such that we get a matrix that satisfies these conditions is hard. For example, if we try to sample coefficients, and reject those when they do not meet the conditions, we are sampling for a very long time. With 3 linear and 3 non-linear confounders per variable, we have 12 coefficients to sample. With only 2 conditions, we are basically sampling from a 10-dimensional space, which is very inefficient. A visualisation of this problem can be seen below in a 2 and 3-dimensional space:
+
+```{r visualising thin surfaces, echo=FALSE, message=FALSE, warning=FALSE}
+
+### 2D circle inside square ###
+set.seed(1)
+
+# number of random points in the square
+n <- 5000
+
+# sample uniformly from [-1,1]^2
+theta1 <- runif(n, -1, 1)
+theta2 <- runif(n, -1, 1)
+
+# radius of the circle (constraint)
+r <- 0.8
+
+# distance from origin
+dist2 <- sqrt(theta1^2 + theta2^2)
+
+# points "near" the circle: thin band of width eps
+eps <- 0.02
+on_circle <- abs(dist2 - r) <= eps
+
+# plot
+plot(theta1, theta2,
+     col = ifelse(on_circle, "red", "grey80"),
+     pch = 16, cex = 0.6,
+     xlab = expression(theta[1]),
+     ylab = expression(theta[2]),
+     main = "Thin surface in 2D: circle inside square")
+abline(h = 0, v = 0, col = "grey50", lty = 3)
+box()
+
+
+### 3D sphere inside cube ###
+library(scatterplot3d)
+
+set.seed(2)
+
+n <- 8000
+
+# sample uniformly from [-1,1]^3
+theta1 <- runif(n, -1, 1)
+theta2 <- runif(n, -1, 1)
+theta3 <- runif(n, -1, 1)
+
+# sphere radius
+r <- 0.9
+
+# distance from origin
+dist3 <- sqrt(theta1^2 + theta2^2 + theta3^2)
+
+# narrow band around the sphere
+eps <- 0.03
+on_sphere <- abs(dist3 - r) <= eps
+
+# 3D scatter: cube in grey, thin shell in red
+scatterplot3d(theta1, theta2, theta3,
+              color = ifelse(on_sphere, "red", "grey80"),
+              pch   = 16,
+              xlab  = expression(theta[1]),
+              ylab  = expression(theta[2]),
+              zlab  = expression(theta[3]),
+              main  = "Thin surface in 3D: sphere shell inside cube")
+
+```
+
+One way of solving this issue would be to allow for some tolerance (i.e. thicken the band), but since our problem is rather simple, we can do better. For this we need to first realize that we can calculate the variance contributed by the confounders as the sum of squares of the coefficients:
+
+$$
+s_X = \sum_{i=1}^{k} \beta_{X,t}^2, \quad s_Y = \sum_{i=1}^{k} \beta_{Y,t}^2,
+$$
+
+where $k$ is the number of confounders (both linear and non-linear), and $\beta_{X}$ and $\beta_{Y}$ are the vectors of coefficients for X and Y respectively. First we must note that:
+
+$$
+s_t = s_{X,t} + s_{Y,t}
+$$
+
+In order to make this problem identifiable, we can impose an extra constraint. As such we can devide the variance equally between X and Y:
+$$ 
+\frac{s_t}{2} = s_{X,t} = s_{Y,t}.
+$$
+
+However, this need not be the case. You can imagine that we make the share of variance a parameter as well, which we can denote as $\delta$. The general form of the constraint would then be:
+
+$$
+s_{X,t} = \delta s_t, \quad s_{Y,t} = (1 - \delta) s_t.
+$$
+
+But for this research rapport, we will stick to the simpler equal variance case. We have a similar choice when we are going to divide variance coming from the non-linear components and the linear components over X and Y. But for this research rapport, we will again assume that the share of non-linear variance on X and Y is equal:
+
+$$
+\eta_t = \eta_{X,t} = \eta_{Y,t}.
+$$
+
+Do note that for the purposes of this research, dividing non-linearity non-equally may be realistic, but pointless. It will make the linear methods perform better, as we are in a doubly robust scenario. Now recall the fomula to compute $eta$, which was defined in section 1.1.7:
+
+$$
+\eta_X = \frac{R^2_{non-linear, X}}{R^2_{linear, X} + R^2_{non-linear, X}}, 
+\quad
+\eta_Y = \frac{R^2_{non-linear, Y}}{R^2_{linear, Y} + R^2_{non-linear, Y}}.
+$$
+
+with our assumption of equal non-linearity, we can rewrite this as:
+
+$$
+R^2_{non-linear, X} = \eta_t R^2_{total, X} = \eta_t\frac{s_t}{2}, 
+\quad 
+R^2_{linear, X} = (1 - \eta_t) R^2_{total, X} = (1 - \eta_t)\frac{s_t}{2},
+$$
+
+and for Y:
+
+$$
+R^2_{non-linear, Y} = \eta_t R^2_{total, Y} = \eta_t\frac{s_t}{2}, 
+\quad 
+R^2_{linear, Y} = (1 - \eta_t) R^2_{total, Y} = (1 - \eta_t)\frac{s_t}{2}.
+$$
 

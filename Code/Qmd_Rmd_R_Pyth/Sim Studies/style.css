@@ -1,0 +1,11 @@
+/* Jutify */
+body p,
+body li {
+  text-align: justify !important;
+}
+
+/* move table captions below + left-align */
+table caption {
+  caption-side: bottom;
+  text-align: left;
+}
