@@ -1,0 +1,21 @@
+---
+title: "Research Rapport Results"
+format: html
+---
+
+This document will produce all the figures and tables that will be used in the research rapport. It also will serve as a compilation of all code that has been written thus far. 
+
+# 1. Purpose
+The purpose of this thesis is twofold. First, it aims to show the shortcomings of current methods and second it aims to propose a new method that overcomes these shortcomings:
+
+1. We first need to show that current SOTA methods such as the RI-CLPM and the DPM are not equipped to handle baseline confounding effects that change over time. 
+2. Second, we need to show that adjustment per occasion in a linear fashion results in biased estimates when the baseline confounding effects are non-linear AND change over time.
+
+We need to run two simulation studies to show these points. The first simulation study will only focus on the inability of the SOTA methods to handle varying effects of baseline confounders. It will show that we need to explicitly model the confounder effects in order to get unbiased estimates of the cross-lagged effects. The second simulation study will then expand on the first by including non-linear confounder effects and showing that linear adjustment per occasion results in biased estimates of the cross-lagged effects. In this second study, we also need to include the integration of machine learning methods with residualisation to flexibly model the confounders effect on each occasion. An added advantage is that this approach does not suppose that we know the true functional form of the confounder effects, but instead we can learn them from the data. 
+
+## 1.1 Conditions
+There are various simulation conditions that need to be considered. Note that for this study, we will not vary all conditions, but focus on defining the problem and providing a proof of concept for our proposed solution. We will briefly consider the following conditions:
+
+* 
+
+
