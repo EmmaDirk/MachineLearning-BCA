@@ -36,7 +36,35 @@ There are various ways in which an effect can change over time. Some of these ar
 * Stepwise effect over time. A change in effects at a specific occasion due to some one-off event. E.g. the effect of age on social media usage changes drastically after COVID-19 lockdowns.
 * Random walk. The effect is drawn from a normal distribution centered around the previous occasion. As such, effects will slowly drift into a direction over time, for example due to societal changes (concept drift). 
 
-In order to determine how much variation there is between the occasions, it would be neat to have some measure of variation. For example, we could calculate the standard deviation of the effects across occasions. This would give us an idea of how much the effects vary over time. Then, we could use this measure to determine make sure all conditions have similar levels of variation.
+In order to determine how much variation there is between the occasions, it would be neat to have some measure of variation. For example, we could calculate the standard deviation of the effects across occasions. This would give us an idea of how much the effects vary over time. Then, we could use this measure to determine make sure all conditions have similar levels of variation. We can compute this measure as follows:
+
+```{r effect variation function}
+
+# function that takes in the matrix B, which holds the effects of the confounders on X and Y
+# where rows = X, Y and columns = occasions
+confounder_variation <- function(B) {
+  
+  # Check input
+  if (!is.matrix(B) || nrow(B) != 2) {
+    stop("B must be a 2 x k matrix (rows = X, Y; columns = occasions).")
+  }
+  
+  # Compute SD across occasions for each row
+  sd_X <- stats::sd(B[1, ])
+  sd_Y <- stats::sd(B[2, ])
+  
+  # Optionally: pooled SD across all betas (flatten matrix)
+  sd_overall <- stats::sd(as.vector(B))
+  
+  # Return results
+  list(
+    sd_X      = sd_X,
+    sd_Y      = sd_Y,
+    sd_overall = sd_overall
+  )
+}
+ 
+```
 
 ### 1.1.2 Strength of confounding effect
 Confounders affect the variables of interest (X and Y). These variables receive an ammount of variance from the confounders. Since the variance of each variable is 1, this variance can be calculated from the regression coefficients directly. This is useful, because we can make all scenarios have the same level of confounding by ensuring that the R squared of the confounders on X and Y is the same across conditions. For the research rapport, we will consider only 1 level of confounding, but later this may be changed. We can calculate the variance received from the confounders as follows:
@@ -45,7 +73,7 @@ $$
 R^2 = B \Psi B^T = B I B^T = B B^T,
 $$
 
-Where $B$ is the matrix of effects of the confounders on X and Y, and $\Psi$ is the covariance matrix of the confounders (which is the identity matrix if the confounders are uncorrelated and have variance 1). Note that we could choose to make the confounders correlated, but for the research rapport we will assume them uncorrelated. Also note that (as will be elaborated upon later) the non-linear parts of each confounder will be orthogonalised w.r.t. their linear 'parent' meaning the covariance between the linear and non-linear component is 0. We can use the following script to determine the strength of the confounding effects from the matrix $B$:
+Where $B$ is the matrix of effects of the confounders on X and Y, and $\Psi$ is the covariance matrix of the confounders (which is the identity matrix if the confounders are uncorrelated and have variance 1). We can denote the variance in our variables of interest that is explained by the confounders as $R^2$. Note that we could choose to make the confounders correlated, but for the research rapport we will assume them uncorrelated. Also note that (as will be elaborated upon later) the non-linear parts of each confounder will be orthogonalised w.r.t. their linear 'parent' meaning the covariance between the linear and non-linear component is 0. We can use the following script to determine the strength of the confounding effects from the matrix $B$:
 
 ```{r confounder strength function}
 
@@ -193,7 +221,7 @@ $$
 \eta = \frac{R^2_{non-linear}}{R^2_{linear} + R^2_{non-linear}},
 $$
 
-where the total variance explained can be denoted by $s$. We can append a subscript $t$ to denote the explained variance per occasion. Our general measure of non-linearity across all occasions can then be computed as:
+where $\eta$ is a number between 0 and 1 that denotes the share of the variance explained by the non-linear components of the confounders in the variables of interest. We can append a subscript $t$ to denote the explained variance per occasion. Our general measure of non-linearity across all occasions can then be computed as:
 
 $$
 \eta_{t} =\frac{R^2_{non-linear, t}}{R^2_{linear, t} + R^2_{non-linear, t}},
@@ -314,7 +342,7 @@ All variables that are not mentioned in the conditions table are held constant a
 * Residual correlations ($\rho$): 0.15
 * Sample size ($N$): 1000
 * Number of occasions ($T$): 5
-* Strength of confounding effects at baseline ($s_0$): 0.25 for both X and Y
+* Strength of confounding effects at baseline ($R^2$): 0.25 for both X and Y
 * Standard deviation of confounding effects over time: 0.1
 * Number of linear confounders: 3
 * Number of non-linear components per confounder: 1
@@ -324,7 +352,6 @@ For the evaluation of our methods we will look at the following performance metr
 
 * Relative bias: the deviation from the true value relative to the true value.
 * Empirical standard error: the standard deviation of the estimates across replications.
-* Coverage: the proportion of replications where the confidence interval contains the true value.
 * Convergence: the proportion of replications where the model converged successfully.
 
 ## 1.3 Sampling beta matrices 
@@ -401,53 +428,946 @@ scatterplot3d(theta1, theta2, theta3,
 One way of solving this issue would be to allow for some tolerance (i.e. thicken the band), but since our problem is rather simple, we can do better. For this we need to first realize that we can calculate the variance contributed by the confounders as the sum of squares of the coefficients:
 
 $$
-s_X = \sum_{i=1}^{k} \beta_{X,t}^2, \quad s_Y = \sum_{i=1}^{k} \beta_{Y,t}^2,
+R^2_X = \sum_{i=1}^{k} \beta_{X,t,i}^2
 $$
 
-where $k$ is the number of confounders (both linear and non-linear), and $\beta_{X}$ and $\beta_{Y}$ are the vectors of coefficients for X and Y respectively. First we must note that:
-
 $$
-s_t = s_{X,t} + s_{Y,t}
+R^2_Y = \sum_{i=1}^{k} \beta_{Y,t,i}^2,
 $$
 
-In order to make this problem identifiable, we can impose an extra constraint. As such we can devide the variance equally between X and Y:
+where $k$ is the number of confounders (both linear and non-linear), and $\beta_{X}$ and $\beta_{Y}$ are the vectors of coefficients for X and Y respectively. The i is just to denote we sum all of the coefficients, up to coefficient k. First we must note that:
+
+$$
+R^2_t = R^2_{X,t} + R^2_{Y,t},
+$$
+
+Where $R^2,t$ denotes the variance explained by the confounders (as a whole) at occasion $t$. $R^2_{X,t}$ is the variance explained by the confounders on the variable that we have labelled $X$. In order to make this problem identifiable, we can impose an extra constraint. As such we can devide the variance equally between X and Y:
+
 $$ 
-\frac{s_t}{2} = s_{X,t} = s_{Y,t}.
+\frac{R^2_t}{2} = R^2_{X,t} = R^2_{Y,t}.
 $$
 
 However, this need not be the case. You can imagine that we make the share of variance a parameter as well, which we can denote as $\delta$. The general form of the constraint would then be:
 
 $$
-s_{X,t} = \delta s_t, \quad s_{Y,t} = (1 - \delta) s_t.
+R^2_{X,t} = \delta R^2_t
 $$
 
-But for this research rapport, we will stick to the simpler equal variance case. We have a similar choice when we are going to divide variance coming from the non-linear components and the linear components over X and Y. But for this research rapport, we will again assume that the share of non-linear variance on X and Y is equal:
-
 $$
-\eta_t = \eta_{X,t} = \eta_{Y,t}.
+R^2_{Y,t} = (1 - \delta) R^2_t,
 $$
 
-Do note that for the purposes of this research, dividing non-linearity non-equally may be realistic, but pointless. It will make the linear methods perform better, as we are in a doubly robust scenario. Now recall the fomula to compute $eta$, which was defined in section 1.1.7:
+It would for example be possible to sample from a distribution to pick a number between 0 and 1 for this parameter $\delta$. This would make the simulation scenarios more general, but for this research rapport, we will stick to the simpler equal variance case. This is mainly done because we are working in a 'doubly robust' scenario. Correct adjustment for the confounders on either X or Y is sufficient to get unbiased estimates of the cross-lagged effects. To show the scenarios where SOTA methods do not work, we should thus first focus on the case where both variables suffer from this scenario equally.
+
+We have a similar choice situation regarding the ammount of non-linearity $\eta$. We can either choose to divide the non-linearity equally between X and Y, or we can choose to divide it unequally. For the research rapport, we will again choose the simpler equal non-linearity case:
 
 $$
-\eta_X = \frac{R^2_{non-linear, X}}{R^2_{linear, X} + R^2_{non-linear, X}}, 
-\quad
-\eta_Y = \frac{R^2_{non-linear, Y}}{R^2_{linear, Y} + R^2_{non-linear, Y}}.
+\eta_t = \eta_{X,t} = \eta_{Y,t},
+$$
+
+where $\eta_{X,t}$ is the non-linearity index for variable X at occasion t, and $\eta_{Y,t}$ is the non-linearity index for variable Y at occasion t. We could again choose to make this a parameter that is sampled from a distribution, which we could call $\gamma$. The general form of this constraint would then be:
+
+$$
+\eta_{X,t} = \gamma \eta_t
+$$
+
+$$
+\eta_{Y,t} = (1 - \gamma)\eta_t,
+$$
+
+For this research rapport, we will again stick to the simpler equal non-linearity case. Partly because this makes the sampling procedure easier, and partly because we are in a doubly robust scenario again. Now recall that in section 1.1.7 we defined the non-linearity index as:
+
+$$
+\eta_t = \frac{R^2_{non-linear, t}}{R^2_{linear, t} + R^2_{non-linear, t}} = \frac{R^2_{non-linear, t}}{R^2_t}.
+$$
+
+We can split this equation up for X and Y:
+
+$$
+\eta_X = \frac{R^2_{\text{non-linear}, X}}{R^2_t}
+$$
+
+$$
+\eta_Y = \frac{R^2_{\text{non-linear}, Y}}{R^2_t},
 $$
 
 with our assumption of equal non-linearity, we can rewrite this as:
 
 $$
-R^2_{non-linear, X} = \eta_t R^2_{total, X} = \eta_t\frac{s_t}{2}, 
-\quad 
-R^2_{linear, X} = (1 - \eta_t) R^2_{total, X} = (1 - \eta_t)\frac{s_t}{2},
+R^2_{\text{non-linear}, X}
+  = \eta_t R^2_X
+  = \eta_t \frac{R^2_t}{2}
 $$
 
-and for Y:
-
 $$
-R^2_{non-linear, Y} = \eta_t R^2_{total, Y} = \eta_t\frac{s_t}{2}, 
-\quad 
-R^2_{linear, Y} = (1 - \eta_t) R^2_{total, Y} = (1 - \eta_t)\frac{s_t}{2}.
+R^2_{\text{linear}, X}
+  = (1 - \eta_t) R^2_X
+  = (1 - \eta_t) \frac{R^2_t}{2},
 $$
 
+where $R^2_{non-linear, X}$ is the variance explained by the non-linear components of the confounders on X, and $R^2_{linear, X}$ is the variance explained by the linear components of the confounders on X. $\eta_t$ is the non-linearity index at occasion t, and $R^2_{X, t}$ denotes the total variance explained by the confounders on X at occasion t. Finally, $R^2_t$ is the total variance explained by the confounders on both X and Y at occasion t. The point being is that the variance explained by the linear and non-linear parts is detemined by the total variance explained and the non-linearity index, when assuming equal non-linearity and variance between X and Y. We can do the same for Y:
+
+$$
+R^2_{\text{non-linear}, Y}
+  = \eta_t R^2_Y
+  = \eta_t \frac{R^2_t}{2}
+$$
+
+$$
+R^2_{\text{linear}, Y}
+  = (1 - \eta_t) R^2_Y
+  = (1 - \eta_t) \frac{R^2_t}{2},
+$$
+
+The more general form of these formulas, where we do not assume equal non-linearity and variance between X and Y, would be:
+
+$$
+R^2_{\text{non-linear}, X} = \frac{\delta \gamma R^2_t}{2}\, ,
+$$
+
+$$
+R^2_{\text{linear}, X} = \frac{\delta (1 - \gamma) R^2_t}{2}\, ,
+$$
+
+$$
+R^2_{\text{non-linear}, Y} = \frac{(1 - \delta)\gamma R^2_t}{2}\, ,
+$$
+
+$$
+R^2_{\text{linear}, Y} = \frac{(1 - \delta)(1 - \gamma) R^2_t}{2}\, ,
+$$
+
+Now is it not a coincidence that we defined the variance explained by the confounders as the sum of squares of the coefficients, obtaining the following equations for these components:
+
+$$
+R^2_{\text{non-linear}, X} = \sum_{i=1}^{k_{nl}} \beta_{X,t,i}^2\, ,
+$$
+
+$$
+R^2_{\text{linear}, X} = \sum_{i=1}^{k_{l}} \beta_{X,t,i}^2\, ,
+$$
+
+$$
+R^2_{\text{non-linear}, Y} = \sum_{i=1}^{k_{nl}} \beta_{Y,t,i}^2\, ,
+$$
+
+$$
+R^2_{\text{linear}, Y} = \sum_{i=1}^{k_{l}} \beta_{Y,t,i}^2\, ,
+$$
+
+where $k_{nl}$ is the number of non-linear confounder components, and $k_{l}$ is the number of linear confounder components. The general case where we do not assume equal non-linearity and variance are ommited here for brevity. If there would be 3 confounders, with 1 non-linear component each, it follows that each of the explained variances ($R^2$) would be the sum of 3 squared coefficients. Now since the value of the squared coefficients also follows directly from the values picked for $\eta$ and $R^2$, given our constraints, we can split the sampling procedure. We must only sample 3 coefficients, such that their squared sum is equal to the desired explained variance. We can do this by using one final trick. First we sample the coefficients from any distribution, but let's use the example of a standard normal:
+
+$$
+\beta_{i} \sim \mathcal{N}(0, 1) \quad \text{for } i = 1, 2, 3
+$$
+
+The sum of these squared coefficients may still have any value, but we need to make their sum equal to the desired explained variance. We can do this by scaling the coefficients:
+
+$$
+\sum{i=1}^{3} \left( \beta_{i} \cdot \sqrt{\frac{R^2_{\text{component}}}{\sum_{j=1}^{3} \beta_{j}^2}} \right)^2 = R^2_{\text{component}},
+$$
+
+by which we obtain the desired sum of squares. To recap, we:
+
+1. Pick a desired explained variance of the confounders on X and Y ($R^2_t$)
+2. Pick a desired non-linearity index ($\eta_t$)
+3. Calculate the explained variance for the linear and non-linear components on X and Y using the formulas above.
+4. Sample 3 coefficients from a standard normal distribution for each component (linear X, non-linear X, linear Y, non-linear Y).
+5. Scale the coefficients such that their sum of squares is equal to the desired explained variance.
+
+We can implement this procedure (assuming equal non-linearity and variance) in the following R function. Do note that here we sample for the first occasion. Later occasions may differs slightly as we implement variation over time. Also note that here we chose to reject any coefficients larger than 0.3 or smaller than -0.3. 
+
+```{r sampling beta matrices function}
+
+sample_gamma <- function(
+    k_lin,                                             # number of linear confounders
+    k_nonlin,                                          # number of nonlinear confounders
+    R2_1,                                              # total variance explained by confounders at occasion 1
+    eta_1,                                             # nonlinearity index at occasion 1
+    min_abs = 0.01,                                    # min and max absolute effect sizes for rejection sampling
+    max_abs = 0.30,
+    max_tries = 1e6                                    # max number of tries
+) {
+
+  k <- k_lin + k_nonlin
+
+  ## allocate variance budgets
+  LX <- (1 - eta_1) * R2_1 / 2
+  LY <- (1 - eta_1) * R2_1 / 2
+  NX <- eta_1 * R2_1 / 2 
+  NY <- eta_1 * R2_1 / 2 
+
+  for (try in 1:max_tries) {
+
+    # ---- sample random directions ----
+    u_x_lin  <- rnorm(k_lin)
+    u_y_lin  <- rnorm(k_lin)
+    u_x_nlin <- rnorm(k_nonlin)
+    u_y_nlin <- rnorm(k_nonlin)
+
+    # ---- normalize ----
+    u_x_lin  <- u_x_lin  / sqrt(sum(u_x_lin^2))
+    u_y_lin  <- u_y_lin  / sqrt(sum(u_y_lin^2))
+    u_x_nlin <- u_x_nlin / sqrt(sum(u_x_nlin^2))
+    u_y_nlin <- u_y_nlin / sqrt(sum(u_y_nlin^2))
+
+    # ---- scale to proper total variance ----
+    gamma_x_lin  <- sqrt(LX) * u_x_lin
+    gamma_y_lin  <- sqrt(LY) * u_y_lin
+    gamma_x_nlin <- sqrt(NX) * u_x_nlin
+    gamma_y_nlin <- sqrt(NY) * u_y_nlin
+
+    # ---- assemble full vectors ----
+    gamma_x <- c(gamma_x_lin,  gamma_x_nlin)
+    gamma_y <- c(gamma_y_lin,  gamma_y_nlin)
+
+    # ---- rejection check (absolute bounds!) ----
+    if (
+      all(abs(gamma_x) >= min_abs & abs(gamma_x) <= max_abs &
+          abs(gamma_y) >= min_abs & abs(gamma_y) <= max_abs)
+    ) {
+      return(list(
+        gamma_x = gamma_x,
+        gamma_y = gamma_y
+      ))
+    }
+  }
+
+  stop("Failed to find a valid sample within max_tries.")
+}
+
+```
+
+## 1.4 Output plots 
+Now it is time to define what we want as the output of our two simulation studies. Some plots need to serve as visual aids to explain in an intuitive manner: What is happening? Other plots are true output plots that will show how our methods perform. From simulation study 1, we want to show the inability of RI-CLPM and DPM to handle time-varying effects of baseline confounders in our 5 varying scenarios. Lets produce the following plots:
+
+### 1.4.1 Simulation study 1
+
+* Plot 1: On the X-axis we have the occasion, and on the Y-axis the effect of the confounder on X. A different plot of the same kind will serve to show the confounder effect on Y, yielding 2 plots in total for each scenario. Since we will sample beta matrixes, each beta will have a different starting point, but all will make 'the same jump'. Each line in the plot thus represents a different run of the simulation. We will visualise the effect of only one confounder as it serves purely for understanding. Such a plot would look like:
+
+```{r visualising time-varying effects, echo=FALSE, message=FALSE, warning=FALSE}
+
+# libs
+library(tidyverse)
+library(patchwork)
+
+# reproducibility
+set.seed(42)
+
+# set the parameters
+n_runs     <- 500                                       # number of simulated lines per scenario
+T_occasions <- 5                                        # number of time points
+scenarios <- c("Constant", "Linear", "Sinusoidal", 
+              "Stepwise", "Random Walk")
+
+# function to generate the path per scenario
+generate_path <- function(beta0, scenario, T_occasions) {
+  
+  # for occasion t up to T
+  t <- 1:T_occasions
+  
+  # adjustments per scenario
+  path <- switch(
+    scenario,
+    
+    # repeat the starting beta
+    "Constant" = rep(beta0, T_occasions),
+    
+    # add constant
+    "Linear" = beta0 + seq(0, 0.4, length.out = T_occasions),  
+    
+    # vary sinusoidally
+    "Sinusoidal" = beta0 + sin(seq(0, 2*pi, length.out = T_occasions)) * 0.2,
+    
+    # make a stepwise jump at t = 3
+    "Stepwise" = {
+      step_jump <- 0.4
+      out <- rep(beta0, T_occasions)
+      out[3:T_occasions] <- out[3:T_occasions] + step_jump  
+      out
+    },
+    
+    # random variation , but in one direction 
+    "Random Walk" = {
+      rw <- cumsum(c(beta0, rnorm(T_occasions - 1, mean = 0, sd = 0.05)))
+      rw
+    }
+  )
+  
+  # save in tibble
+  tibble(
+    occasion = t,
+    beta = path
+  )
+}
+
+# generate data for all scenarios and runs 
+demo_data <- map_df(
+
+  # imput scenarios
+  scenarios,
+
+  # define function per scenario
+  function(scen) {
+
+    # apply over number of runs
+    map_df(
+      1:n_runs,
+      function(run_id) {
+
+        # random starting point
+        beta0 <- rnorm(1, 0.1, 0.05)  
+
+        # use the generation function
+        generate_path(beta0, scen, T_occasions) %>%
+          mutate(
+            run = run_id,
+            scenario = scen
+          )
+      }
+    )
+  }
+)
+
+# save data for X and Y effects
+demo_data_xy <- demo_data %>%
+  mutate(
+    beta_X = beta,
+    beta_Y = beta   
+  )
+
+# create a blue → magenta palette for the line colours
+blue_magenta <- c(
+  "#3B4CC0",  
+  "#5E60CE",
+  "#7A70D1",
+  "#9775D3",
+  "#B67BD2",
+  "#D084CF",
+  "#E28FC4",
+  "#F29BC1",
+  "#FF9ACD"
+)
+
+# repeat the palette so the number of colours matches the number of runs
+n_runs <- length(unique(demo_data_xy$run))
+blue_magenta_extended <- rep(blue_magenta, length.out = n_runs)
+
+# plot the effects on X
+plot_X <- ggplot(demo_data_xy,
+                 aes(x = occasion, y = beta_X,
+                     group = run, color = factor(run))) +
+  geom_line(linewidth = 1) +
+  facet_wrap(~ scenario) +
+  scale_color_manual(values = blue_magenta_extended) +
+  labs(
+    x = "Occasion",
+    y = "Effect on X"
+  ) +
+  theme_minimal(base_size = 10) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(size = 10)
+  )
+
+plot_X
+
+```
+
+* Plot 2: On the X-axis we again have the occasion, and on the Y-axis the explained variance ($R^2$) of the confounder on X. Each line in the plot thus represents a different run of the simulation. We will visualise the effect of only one confounder as it serves purely for understanding. Such a plot would look like:
+
+```{r visualising time-varying R2, echo=FALSE, message=FALSE, warning=FALSE}
+
+# compute explained variance R² for X 
+demo_data_r2 <- demo_data_xy %>%
+  mutate(
+    R2_X = beta_X^2,
+    R2_Y = beta_Y^2
+  )
+
+plot_R2_X <- ggplot(demo_data_r2,
+                    aes(x = occasion, y = R2_X,
+                        group = run, color = factor(run))) +
+  geom_line(linewidth = 1) +
+  facet_wrap(~ scenario) +
+  scale_color_manual(values = blue_magenta_extended) +
+  labs(
+    x = "Occasion",
+    y = expression(R^2 ~ "of confounder on X")
+  ) +
+  theme_minimal(base_size = 10) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(size = 10)
+  )
+
+plot_R2_X
+
+```
+
+* Plot 3: The first of the true results plots. On the X-axis we again have the occasion, and on the Y-axis we plot the relative bias. Now do note that relative bias is the (|estimate - true value|) / true value. Taking the absolute value here is important, since otherwise, positive and negative bias cancel out. We need to make two plots: bias for the autoregressive parameter and bias for the cross-lagged parammeter. For each scenario we will thus obtain: 2 (each parameter) * 5 (scenarios) * 5 (methods) = 50 plots in total. We will make a grid where we have the 5 scenarios, and then we get the plot for each method. We will have 2 of those plots, one for each parameter. Note that we would get twice the grid size if we were to include these for Y too. Here we will show just one example plot: 
+
+```{r visualising relative bias example, echo=FALSE, message=FALSE, warning=FALSE}
+
+# reproducibility
+set.seed(123)
+
+# methods
+methods <- c("RI_CLPM", "DPM", "CLPM", "CLPM_LBCA", "CLPM_Adj")
+
+# add true values
+demo_bias <- demo_data_xy %>%
+  mutate(
+    true_cross = 0.10,
+    true_auto  = 0.25
+  )
+
+# fake estimates
+demo_bias <- demo_bias %>%
+  mutate(
+    est_RI_CLPM   = true_cross + rnorm(n(), 0, 0.03),
+    est_DPM       = true_cross + rnorm(n(), 0, 0.03),
+    est_CLPM      = true_cross + rnorm(n(), 0, 0.03),
+    est_CLPM_LBCA = true_cross + rnorm(n(), 0, 0.03),
+    est_CLPM_Adj  = true_cross + rnorm(n(), 0, 0.03),
+
+    estA_RI_CLPM   = true_auto + rnorm(n(), 0, 0.04),
+    estA_DPM       = true_auto + rnorm(n(), 0, 0.04),
+    estA_CLPM      = true_auto + rnorm(n(), 0, 0.04),
+    estA_CLPM_LBCA = true_auto + rnorm(n(), 0, 0.04),
+    estA_CLPM_Adj  = true_auto + rnorm(n(), 0, 0.04)
+  )
+
+# relative bias
+demo_bias <- demo_bias %>%
+  mutate(
+    rb_RI_CLPM   = abs(est_RI_CLPM   - true_cross) / true_cross,
+    rb_DPM       = abs(est_DPM       - true_cross) / true_cross,
+    rb_CLPM      = abs(est_CLPM      - true_cross) / true_cross,
+    rb_CLPM_LBCA = abs(est_CLPM_LBCA - true_cross) / true_cross,
+    rb_CLPM_Adj  = abs(est_CLPM_Adj  - true_cross) / true_cross
+  )
+
+# mean bias per occasion × scenario × method
+demo_plotdata <- demo_bias %>%
+  select(scenario, occasion, run, starts_with("rb_")) %>%
+  pivot_longer(
+    cols = starts_with("rb_"),
+    names_to = "method",
+    values_to = "rel_bias"
+  ) %>%
+  mutate(
+    method = gsub("rb_", "", method),
+    method = factor(method, levels = methods)
+  ) %>%
+  group_by(scenario, method, occasion) %>%
+  summarise(mean_bias = mean(rel_bias), .groups = "drop")
+
+# colours
+method_colors <- c(
+  "RI_CLPM"   = "#3B4CC0",
+  "DPM"       = "#5E60CE",
+  "CLPM"      = "#7A70D1",
+  "CLPM_LBCA" = "#B67BD2",
+  "CLPM_Adj"  = "#EE3A8C"
+)
+
+# plot
+plot_bias_cross <- ggplot(demo_plotdata,
+                          aes(x = occasion, y = mean_bias,
+                              color = method, group = method)) +
+  geom_point(size = 2) +
+  geom_line(linewidth = 0.8) +
+  facet_grid(method ~ scenario) +
+  scale_color_manual(values = method_colors) +
+  labs(
+    x = "Occasion",
+    y = "Mean Relative Bias (Cross-Lagged)"
+  ) +
+  theme_minimal(base_size = 10) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(size = 10)
+  )
+
+plot_bias_cross
+
+```
+
+* Plot 4: produce the same plot, but for the emprical standard error instead of the relative bias.
+
+```{r visualising empirical SE example, echo=FALSE, message=FALSE, warning=FALSE}
+
+# empirical standard error per occasion × scenario × method
+demo_se <- demo_bias %>%
+  select(scenario, occasion, run, starts_with("rb_")) %>%
+  pivot_longer(
+    cols = starts_with("rb_"),
+    names_to = "method",
+    values_to = "rel_bias"
+  ) %>%
+  mutate(
+    method = gsub("rb_", "", method),
+    method = factor(method, levels = methods)
+  ) %>%
+  group_by(scenario, method, occasion) %>%
+  summarise(se_bias = sd(rel_bias), .groups = "drop")
+
+# colours
+method_colors <- c(
+  "RI_CLPM"   = "#3B4CC0",
+  "DPM"       = "#5E60CE",
+  "CLPM"      = "#7A70D1",
+  "CLPM_LBCA" = "#B67BD2",
+  "CLPM_Adj"  = "#EE3A8C"
+)
+
+# plot empirical SE
+plot_se_cross <- ggplot(demo_se,
+                        aes(x = occasion, y = se_bias,
+                            color = method, group = method)) +
+  geom_point(size = 2) +
+  geom_line(linewidth = 0.8) +
+  facet_grid(method ~ scenario) +
+  scale_color_manual(values = method_colors) +
+  labs(
+    x = "Occasion",
+    y = "Empirical SE (Cross-Lagged)"
+  ) +
+  theme_minimal(base_size = 10) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(size = 10)
+  )
+
+plot_se_cross
+
+```
+
+* plot 5: Even though the previous plots are very detailed, which is great, it would be nice to have one summary plot. It should simply show a boxplot of the mean absolute estimate with each S.e. . As such we should get 5 boxplots for each method, one per scenario. Do note that this doubles once we want to include a plot for the autoregressive parameter too. 
+
+```{r visualising estimates summary, echo=FALSE, message=FALSE, warning=FALSE}
+
+# true cross-lagged value
+true_beta <- 0.10
+
+# build correct per-scenario summaries
+summary_est <- demo_bias %>%
+  select(scenario, occasion, run, starts_with("est_")) %>%
+  pivot_longer(
+    cols = starts_with("est_"),
+    names_to = "method",
+    values_to = "estimate"
+  ) %>%
+  mutate(
+    method = gsub("est_", "", method),
+    method = factor(method, levels = methods)
+  ) %>%
+  group_by(scenario, method) %>%
+  summarise(
+    mean_est = mean(estimate),   # raw estimate mean per scenario × method
+    sd_est   = sd(estimate),     # empirical SD
+    .groups = "drop"
+  ) %>%
+  mutate(true_val = true_beta)   # <- explicitly add truth
+
+method_colors <- c(
+  "RI_CLPM"   = "#3B4CC0",
+  "DPM"       = "#5E60CE",
+  "CLPM"      = "#7A70D1",
+  "CLPM_LBCA" = "#B67BD2",
+  "CLPM_Adj"  = "#EE3A8C"
+)
+
+plot_estimates_scen <- ggplot(summary_est,
+                              aes(x = method, y = mean_est, color = method)) +
+
+  geom_errorbar(aes(ymin = mean_est - sd_est,
+                    ymax = mean_est + sd_est),
+                width = 0.15, linewidth = 0.8, alpha = 0.85) +
+
+  geom_point(size = 2) +
+
+  geom_hline(aes(yintercept = true_val),
+             linetype = "dashed", linewidth = 0.9) +
+
+  facet_grid(scenario ~ .) +   # <- one block per scenario
+
+  scale_color_manual(values = method_colors) +
+
+  labs(
+    x = "Method",
+    y = "Estimated Cross-Lagged Effect"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(size = 11, face = "bold"),
+    axis.text.x = element_text(angle = 25, hjust = 1)
+  )
+
+plot_estimates_scen
+
+```
+
+This means all can be created from a dataframe which has the following structure:
+
+```{r final demo dataframe structure, echo=FALSE, message=FALSE, warning=FALSE}
+
+library(kableExtra)
+
+# show first rows of the final simulation dataset
+demo_bias %>%
+  head(10) %>%      # just the header
+  kbl(booktabs = TRUE,
+      caption = "Structure of the Final Simulation Output (First 10 Rows)") %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+Where in our final simulations, beta will not be one number, but a vector of coefficients for all confounders. Additionally, we will need to save the convergence information per method as well, which can simply be appended using an extra column per method with TRUE/FALSE values. 
+
+### 1.4.2 Simulation study 2
+
+* Plot 1: This plot looks exactly the same as for simulation study 1. 
+* Plot 2: This plot is the same, except for one important caveat: we want to split the variance by non-linear and linear variance. We want to visualise this clearly. What we want to do is to 'add' the non-linear variance 'on top' of the linear variance. Note that for this plot to work we need both the linear and the non-linear coefficients. 
+
+```{r visualising time-varying R2 non-linear addition, echo=FALSE, message=FALSE, warning=FALSE}
+
+# assume 40% of explained variance is nonlinear
+eta <- 0.40
+
+# compute linear and nonlinear R² components
+demo_data_r2 <- demo_data_xy %>%
+  mutate(
+    R2_total = beta_X^2,
+    R2_nl    = eta * R2_total,
+    R2_lin   = (1 - eta) * R2_total
+  )
+
+# long transform with correct stacking order
+demo_data_r2_long <- demo_data_r2 %>%
+  select(scenario, occasion, run, R2_lin, R2_nl) %>%
+  pivot_longer(
+    cols = c(R2_lin, R2_nl),
+    names_to = "component",
+    values_to = "R2"
+  ) %>%
+  mutate(
+    component = factor(component, levels = c("R2_lin", "R2_nl"))
+  )
+
+# stacked area plot, no legend
+plot_R2_stacked <- ggplot(demo_data_r2_long,
+                          aes(x = occasion, y = R2,
+                              fill = component,
+                              group = interaction(run, component))) +
+  geom_area(alpha = 0.65, position = "stack") +
+  facet_wrap(~ scenario) +
+  scale_fill_manual(
+    values = c(
+      R2_lin = "#7A70D1",   # bottom layer
+      R2_nl  = "#EE3A8C"    # top layer
+    )
+  ) +
+  labs(
+    x = "Occasion",
+    y = expression(R^2 ~ "Explained variance")
+  ) +
+  theme_minimal(base_size = 10) +
+  theme(
+    strip.text = element_text(size = 10),
+    legend.position = "none"     # <— yeeted legend
+  )
+
+plot_R2_stacked
+
+```
+
+* Plot 3: Same as simulation study 1, but we now add some methods. 
+
+```{r visualising relative bias example sim2, echo=FALSE, message=FALSE, warning=FALSE}
+
+# reproducibility
+set.seed(123)
+
+# 9 methods for Simulation Study 2
+methods <- c(
+  "CLPM",
+  "RI_CLPM",
+  "DPM",
+  "CLPM_LinAdj",
+  "CLPM_BCA",
+  "LASSO",
+  "RF",
+  "BART",
+  "XGBoost"
+)
+
+# add true values
+demo_bias <- demo_data_xy %>%
+  mutate(
+    true_cross = 0.10,
+    true_auto  = 0.25
+  )
+
+# fake estimates for demonstration — replace later with real simulation outputs
+demo_bias <- demo_bias %>%
+  mutate(
+    est_CLPM        = true_cross + rnorm(n(), 0, 0.04),
+    est_RI_CLPM     = true_cross + rnorm(n(), 0, 0.04),
+    est_DPM         = true_cross + rnorm(n(), 0, 0.04),
+    est_CLPM_LinAdj = true_cross + rnorm(n(), 0, 0.04),
+    est_CLPM_BCA    = true_cross + rnorm(n(), 0, 0.04),
+    est_LASSO       = true_cross + rnorm(n(), 0, 0.04),
+    est_RF          = true_cross + rnorm(n(), 0, 0.04),
+    est_BART        = true_cross + rnorm(n(), 0, 0.04),
+    est_XGBoost     = true_cross + rnorm(n(), 0, 0.04)
+  )
+
+# compute relative bias
+demo_bias <- demo_bias %>%
+  mutate(
+    rb_CLPM        = abs(est_CLPM        - true_cross) / true_cross,
+    rb_RI_CLPM     = abs(est_RI_CLPM     - true_cross) / true_cross,
+    rb_DPM         = abs(est_DPM         - true_cross) / true_cross,
+    rb_CLPM_LinAdj = abs(est_CLPM_LinAdj - true_cross) / true_cross,
+    rb_CLPM_BCA    = abs(est_CLPM_BCA    - true_cross) / true_cross,
+    rb_LASSO       = abs(est_LASSO       - true_cross) / true_cross,
+    rb_RF          = abs(est_RF          - true_cross) / true_cross,
+    rb_BART        = abs(est_BART        - true_cross) / true_cross,
+    rb_XGBoost     = abs(est_XGBoost     - true_cross) / true_cross
+  )
+
+# reshape → mean RB per occasion × scenario × method
+demo_plotdata <- demo_bias %>%
+  select(scenario, occasion, run, starts_with("rb_")) %>%
+  pivot_longer(
+    cols = starts_with("rb_"),
+    names_to = "method",
+    values_to = "rel_bias"
+  ) %>%
+  mutate(
+    method = gsub("rb_", "", method),
+    method = factor(method, levels = methods)
+  ) %>%
+  group_by(scenario, method, occasion) %>%
+  summarise(mean_bias = mean(rel_bias), .groups = "drop")
+
+# method colors (9 distinct)
+method_colors <- c(
+  "CLPM"        = "#3B4CC0",
+  "RI_CLPM"     = "#5E60CE",
+  "DPM"         = "#7A70D1",
+  "CLPM_LinAdj" = "#9775D3",
+  "CLPM_BCA"    = "#B67BD2",
+  "LASSO"       = "#D084CF",
+  "RF"          = "#E28FC4",
+  "BART"        = "#F29BC1",
+  "XGBoost"     = "#EE3A8C"
+)
+
+# final plot: 9 methods × 5 scenarios grid
+plot_bias_cross <- ggplot(demo_plotdata,
+                          aes(x = occasion, y = mean_bias,
+                              color = method, group = method)) +
+  geom_point(size = 1.8) +
+  geom_line(linewidth = 0.9) +
+  facet_grid(method ~ scenario) +
+  scale_color_manual(values = method_colors) +
+  labs(
+    x = "Occasion",
+    y = "Mean Relative Bias (Cross-Lagged)"
+  ) +
+  theme_minimal(base_size = 9) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(size = 9)
+  )
+
+plot_bias_cross
+
+```
+
+* Plot 4: Same as simulation study 1, but with the added methods.
+
+```{r visualising empirical SE example sim2, echo=FALSE, message=FALSE, warning=FALSE}
+
+# empirical SD per occasion × scenario × method
+demo_plotdata_se <- demo_bias %>%
+  select(scenario, occasion, run, starts_with("est_")) %>%
+  pivot_longer(
+    cols = starts_with("est_"),
+    names_to = "method",
+    values_to = "estimate"
+  ) %>%
+  mutate(
+    method = gsub("est_", "", method),
+    method = factor(method, levels = methods)
+  ) %>%
+  group_by(scenario, method, occasion) %>%
+  summarise(se_est = sd(estimate), .groups = "drop")
+
+# same 9-method colors
+method_colors <- c(
+  "CLPM"        = "#3B4CC0",
+  "RI_CLPM"     = "#5E60CE",
+  "DPM"         = "#7A70D1",
+  "CLPM_LinAdj" = "#9775D3",
+  "CLPM_BCA"    = "#B67BD2",
+  "LASSO"       = "#D084CF",
+  "RF"          = "#E28FC4",
+  "BART"        = "#F29BC1",
+  "XGBoost"     = "#EE3A8C"
+)
+
+# empirical SD plot
+plot_se_cross <- ggplot(demo_plotdata_se,
+                        aes(x = occasion, y = se_est,
+                            color = method, group = method)) +
+  geom_point(size = 1.8) +
+  geom_line(linewidth = 0.9) +
+  facet_grid(method ~ scenario) +
+  scale_color_manual(values = method_colors) +
+  labs(
+    x = "Occasion",
+    y = "Empirical SD (Cross-Lagged)"
+  ) +
+  theme_minimal(base_size = 9) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(size = 9)
+  )
+
+plot_se_cross
+
+```
+
+* Plot 5: Same as simulation study 1, but with the added methods.
+
+```{r visualising estimates summary sim2, echo=FALSE, message=FALSE, warning=FALSE}
+
+# true cross-lagged value
+true_beta <- 0.10
+
+# build summary dataset (mean estimate + empirical SD)
+summary_est <- demo_bias %>%
+  select(scenario, occasion, run, starts_with("est_")) %>%
+  pivot_longer(
+    cols = starts_with("est_"),
+    names_to = "method",
+    values_to = "estimate"
+  ) %>%
+  mutate(
+    method = gsub("est_", "", method),
+    method = factor(method, levels = methods)   # 9-method vector
+  ) %>%
+  group_by(scenario, method) %>%
+  summarise(
+    mean_est = mean(estimate),   # average estimate across runs × occasions
+    sd_est   = sd(estimate),     # empirical SD
+    .groups = "drop"
+  ) %>%
+  mutate(true_val = true_beta)    # add truth line
+
+# 9-method palette
+method_colors <- c(
+  "CLPM"        = "#3B4CC0",
+  "RI_CLPM"     = "#5E60CE",
+  "DPM"         = "#7A70D1",
+  "CLPM_LinAdj" = "#9775D3",
+  "CLPM_BCA"    = "#B67BD2",
+  "LASSO"       = "#D084CF",
+  "RF"          = "#E28FC4",
+  "BART"        = "#F29BC1",
+  "XGBoost"     = "#EE3A8C"
+)
+
+# final plot
+plot_estimates_scen <- ggplot(summary_est,
+                              aes(x = method, y = mean_est, color = method)) +
+
+  geom_errorbar(aes(ymin = mean_est - sd_est,
+                    ymax = mean_est + sd_est),
+                width = 0.15, linewidth = 0.8, alpha = 0.85) +
+
+  geom_point(size = 2) +
+
+  geom_hline(aes(yintercept = true_val),
+             linetype = "dashed", linewidth = 0.9) +
+
+  facet_grid(scenario ~ .) +
+
+  scale_color_manual(values = method_colors) +
+
+  labs(
+    x = "Method",
+    y = "Estimated Cross-Lagged Effect"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(size = 11, face = "bold"),
+    axis.text.x = element_text(angle = 25, hjust = 1)
+  )
+
+plot_estimates_scen
+
+```
+
+Finally, the dataframe structure:
+
+```{r final demo dataframe structure sim2, echo=FALSE, message=FALSE, warning=FALSE}
+
+library(kableExtra)
+
+# Build a template that includes linear + nonlinear pieces explicitly
+simulation_output_template <- demo_bias %>%
+  mutate(
+    # Decompose beta_X and beta_Y into linear + nonlinear components.
+    # For demonstration we assume eta = .40 as earlier.
+    eta = 0.40,
+    beta_X_lin = sqrt(1 - eta) * beta_X,
+    beta_X_nl  = sqrt(eta)     * beta_X,
+    beta_Y_lin = sqrt(1 - eta) * beta_Y,
+    beta_Y_nl  = sqrt(eta)     * beta_Y
+  ) %>%
+  select(
+    # identifiers
+    scenario,
+    occasion,
+    run,
+
+    # linear / nonlinear decomposition
+    beta_X_lin,
+    beta_X_nl,
+    beta_Y_lin,
+    beta_Y_nl,
+
+    # total effect
+    beta_X,
+    beta_Y,
+
+    # true values
+    true_cross,
+    true_auto,
+
+    # all estimates (cross-lag)
+    starts_with("est_"),
+
+    # all estimates (autoregressive)
+    starts_with("estA_")
+  ) %>%
+  head(10)
+
+simulation_output_template %>%
+  kbl(
+    booktabs = TRUE,
+    caption = "Template of Final Simulation Output Including Linear/Nonlinear Confounder Effects"
+  ) %>%
+  kable_styling(full_width = FALSE)
+
+```
+
+# 2. Simulation study 1. 
+So now we will move to the first simulation study, where we want to show the inability of RI-CLPM and DPM to handle time-varying effects of baseline confounders. 

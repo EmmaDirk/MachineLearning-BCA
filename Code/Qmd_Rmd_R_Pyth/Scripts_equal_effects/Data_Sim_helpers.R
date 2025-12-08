@@ -92,8 +92,8 @@ nonlinearity_index(gamma_x1, gamma_y1, k_lin)
 sample_gamma <- function(
     k_lin,                                             # number of linear confounders
     k_nonlin,                                          # number of nonlinear confounders
-    s0,                                                # total variance explained by confounders
-    eta0,                                              # nonlinearity index
+    R2_1,                                              # total variance explained by confounders at occasion 1
+    eta_1,                                             # nonlinearity index at occasion 1
     min_abs = 0.01,                                    # min and max absolute effect sizes for rejection sampling
     max_abs = 0.30,
     max_tries = 1e6                                    # max number of tries
@@ -102,10 +102,10 @@ sample_gamma <- function(
   k <- k_lin + k_nonlin
 
   ## allocate variance budgets
-  LX <- (1 - eta0) * s0 / 2
-  LY <- (1 - eta0) * s0 / 2
-  NX <- eta0 * s0 / 2
-  NY <- eta0 * s0 / 2
+  LX <- (1 - eta_1) * R2_1 / 2
+  LY <- (1 - eta_1) * R2_1 / 2
+  NX <- eta_1 * R2_1 / 2 
+  NY <- eta_1 * R2_1 / 2 
 
   for (try in 1:max_tries) {
 
