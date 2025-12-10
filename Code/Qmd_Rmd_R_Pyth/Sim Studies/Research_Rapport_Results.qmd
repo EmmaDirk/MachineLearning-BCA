@@ -1370,4 +1370,1532 @@ simulation_output_template %>%
 ```
 
 # 2. Simulation study 1. 
-So now we will move to the first simulation study, where we want to show the inability of RI-CLPM and DPM to handle time-varying effects of baseline confounders. 
+So now we will move to the first simulation study, where we want to show the inability of RI-CLPM and DPM to handle time-varying effects of baseline confounders. We will build the functions needed for this simulation study block by block, starting with the function to sample the B-matrix. 
+
+## 2.1 Sample B-matrix function
+
+```{r sample B linear function, eval=false, message=FALSE, warning=FALSE}
+
+#| label: sample-B-linear
+#| eval: true
+#| message: false
+#| warning: false
+
+# ---------------------------------------------------------
+# Function: sample_B_linear()
+# ---------------------------------------------------------
+# Purpose:
+#   Sample a 2 × k matrix of *linear* confounder effects such that:
+#       sum(b_x^2) = R2_1 / 2
+#       sum(b_y^2) = R2_1 / 2
+#   with random orientation but fixed magnitude.
+#
+# Arguments:
+#   k        = number of linear confounders
+#   R2_1     = total R² of confounders at t = 1
+#   min_abs  = min allowed abs(beta)
+#   max_abs  = max allowed abs(beta)
+#   max_tries = maximum rejection attempts
+#
+# Returns:
+#   B1 : 2 × k matrix (rows = X, Y)
+# ---------------------------------------------------------
+
+sample_B_linear <- function(
+    k,
+    R2_1,
+    min_abs   = 0.01,
+    max_abs   = 0.30,
+    max_tries = 100000
+) {
+
+  # required variance explained per variable
+  target_X <- R2_1 / 2
+  target_Y <- R2_1 / 2
+
+  for (i in seq_len(max_tries)) {
+
+    # --- random direction for X row ---
+    u_x <- rnorm(k)
+    u_x <- u_x / sqrt(sum(u_x^2))
+    b_x <- sqrt(target_X) * u_x
+
+    # --- random direction for Y row ---
+    u_y <- rnorm(k)
+    u_y <- u_y / sqrt(sum(u_y^2))
+    b_y <- sqrt(target_Y) * u_y
+
+    # --- rejection condition ---
+    if (all(abs(b_x) >= min_abs,
+            abs(b_x) <= max_abs,
+            abs(b_y) >= min_abs,
+            abs(b_y) <= max_abs)) {
+
+      B1 <- rbind(b_x, b_y)
+      rownames(B1) <- c("X", "Y")
+      colnames(B1) <- paste0("c", 1:k)
+      return(B1)
+    }
+  }
+
+  stop("Failed to sample a valid B matrix within max_tries.")
+}
+
+```
+
+After we have created the beta-matrices for the first wave, we must generate their trajectory over the next waves. We will create a function that takes the initial beta-matrix and a scenario type, and returns the full list of beta-matrices for all occasions. It is of importance here that we will vary the confounder the same ammount in each scenario! 
+
+## 2.2 Generate B trajectory function
+
+```{r generate B trajectory function, eval=false, message=FALSE, warning=FALSE}
+
+#| label: generate-B-trajectory
+#| eval: true
+#| message: false
+#| warning: false
+
+# ---------------------------------------------------------
+# Function: generate_B_trajectory()
+# ---------------------------------------------------------
+# Purpose:
+#   Starting from a baseline B1 (2 × k), generate a list of
+#   time-varying B matrices B_t for t = 1...T according to:
+#     - "constant"
+#     - "linear"
+#     - "sinusoidal"
+#     - "stepwise"
+#     - "random_walk"
+#
+#   Crucially: the *variance across occasions* of the beta
+#   adjustments is equal across all scenarios.
+#
+# Arguments:
+#   B1           = baseline B matrix (2 × k)
+#   T            = number of occasions
+#   scenario     = one of:
+#                 "constant", "linear", "sinusoidal",
+#                 "stepwise", "random_walk"
+#   target_sd    = desired standard deviation of betas over time
+#   rw_sd        = step size for random walk scenario
+#
+# Returns:
+#   List of B_t matrices for t = 1...T
+# ---------------------------------------------------------
+
+generate_B_trajectory <- function(
+    B1,
+    T,
+    scenario = c("constant","linear","sinusoidal","stepwise","random_walk"),
+    target_sd = 0.10,   # sd of beta variation over occasions
+    rw_sd     = 0.05
+){
+
+  scenario <- match.arg(scenario)
+  k <- ncol(B1)
+
+  # ---- Step 1: create unscaled variation pattern v_t ----
+  tvec <- 1:T
+
+  if (scenario == "constant") {
+    v <- rep(0, T)
+
+  } else if (scenario == "linear") {
+    v <- seq(0, 1, length.out = T)
+
+  } else if (scenario == "sinusoidal") {
+    v <- sin(seq(0, 2*pi, length.out = T))
+
+  } else if (scenario == "stepwise") {
+    v <- c(rep(0, floor(T/2)), rep(1, T - floor(T/2)))
+
+  } else if (scenario == "random_walk") {
+    # zero start ensures comparability across reps
+    steps <- rnorm(T - 1, mean = 0, sd = rw_sd)
+    v <- c(0, cumsum(steps))
+  }
+
+  # ---- Step 2: scale v_t so Var(v_t) = target_sd^2 ----
+  v_centered <- v - mean(v)
+  current_sd <- sd(v_centered)
+
+  if (current_sd > 0) {
+    scaling_factor <- target_sd / current_sd
+    v_scaled <- v_centered * scaling_factor
+  } else {
+    v_scaled <- rep(0, T)
+  }
+
+  # ---- Step 3: apply v_scaled to each beta coefficient ----
+  B_list <- vector("list", T)
+  names(B_list) <- paste0("t", 1:T)
+
+  for (t in 1:T) {
+    B_list[[t]] <- B1 + v_scaled[t]
+  }
+
+  return(B_list)
+}
+
+```
+
+## 2.3 Simulate panel data function
+Now that we have our beta-matrix for every occasion, we have all we need to simulate some juicy data. For these data, we do not take non-linear confounder effects into account, as this is reserved for simulation study 2. We will create a function that simulates data for one run of the simulation, given the B-matrices, autoregressive and cross-lagged parameters, number of individuals, and residual variances.
+
+```{r simulate panel data function, eval=false, message=FALSE, warning=FALSE}
+
+library(mvtnorm)
+
+simulate_panel_data <- function(
+    N,
+    T,
+    B_list,
+    ar   = 0.25,
+    cross = 0.10,
+    rho   = 0.30
+){
+  # -------------------------------------------------------
+  # 1. Dynamics matrix
+  # -------------------------------------------------------
+  A <- matrix(c(ar, cross,
+                cross, ar), 2, 2, byrow = TRUE)
+
+  k <- ncol(B_list[[1]])
+
+  # -------------------------------------------------------
+  # 2. Confounders
+  # -------------------------------------------------------
+  U <- mvtnorm::rmvnorm(N, sigma = diag(k))
+
+  # output matrix
+  df <- matrix(NA, N, 2*T + k)
+  colnames(df) <- c(paste0("x",1:T), paste0("y",1:T), paste0("c",1:k))
+  df[, (2*T+1):(2*T+k)] <- U
+
+  # -------------------------------------------------------
+  # Function to make innovation covariance Sigma_e
+  # Ensures Var(X_t) = 1 and Var(Y_t) = 1
+  # -------------------------------------------------------
+  make_Sigma_e <- function(Bt, S_dyn, rho){
+    # confounder contribution
+    S_U <- Bt %*% t(Bt)
+
+    # variance that must be supplied by the innovation errors
+    d <- 1 - diag(S_dyn + S_U)
+
+    # numerical floor
+    d[d < 1e-12] <- 1e-12
+
+    # correlation structure
+    R <- matrix(c(1, rho,
+                  rho, 1), 2, 2)
+
+    # scale to desired variance
+    D <- diag(sqrt(d))
+    Sigma_e <- D %*% R %*% D
+    Sigma_e
+  }
+
+  # -------------------------------------------------------
+  # 3. Wave 1 (NO AR CONTRIBUTION)
+  # -------------------------------------------------------
+  S_dyn1 <- matrix(0, 2, 2)   # AR contributes nothing at t=1
+  Sigma_e1 <- make_Sigma_e(B_list[[1]], S_dyn1, rho)
+
+  Ddyn <- mvtnorm::rmvnorm(N, sigma = Sigma_e1)
+  obs1 <- Ddyn + U %*% t(B_list[[1]])
+
+  df[,1]   <- obs1[,1]
+  df[,1+T] <- obs1[,2]
+
+  # latent variance for next step
+  S_prev <- Sigma_e1
+
+  # -------------------------------------------------------
+  # 4. Waves 2...T
+  # -------------------------------------------------------
+  for(t in 2:T){
+
+    # AR contribution at this wave
+    S_dyn_t <- A %*% S_prev %*% t(A)
+
+    # innovation covariance required to keep Var = 1
+    Sigma_et <- make_Sigma_e(B_list[[t]], S_dyn_t, rho)
+
+    # update latent state
+    Ddyn <- Ddyn %*% t(A) + mvtnorm::rmvnorm(N, sigma = Sigma_et)
+
+    obs <- Ddyn + U %*% t(B_list[[t]])
+    df[, t]    <- obs[,1]
+    df[, t+T ] <- obs[,2]
+
+    # update variance tracker
+    S_prev <- S_dyn_t + Sigma_et
+    S_prev <- (S_prev + t(S_prev))/2   # symmetrize
+  }
+
+  df
+}
+
+# example workflow
+set.seed(123)
+
+B1 <- sample_B_linear(
+  k    = 3,
+  R2_1 = 0.20   # total confounder R² at wave 1
+)
+
+B_list <- generate_B_trajectory(
+  B1 = B1,
+  T  = 5,
+  scenario  = "sinusoidal",
+  target_sd = 0.10
+)
+
+df <- simulate_panel_data(
+  N = 10000000,
+  T = 5,
+  B_list = B_list,
+  ar = 0.25,
+  cross = 0.10,
+  rho = 0.15
+)
+
+# round(apply(df[,1:(2*5)], 2, var), 3)
+
+```
+
+## 2.4 Build model functions
+
+
+The next step is to build the models. We need functions to build those since the number of occasions and confounders is dynamic. The first model to build is the CLPM without any adjustment whatsoever. 
+
+### 2.4.1 CLPM unadjusted
+
+```{r build CLPM function, eval=false, message=FALSE, warning=FALSE}
+
+# ---------------------------------------------------------
+# Function: build_clpm()
+# ---------------------------------------------------------
+# Purpose:
+#   Create a basic CLPM syntax string for lavaan.
+#   Each occasion t is predicted by x(t-1) and y(t-1).
+#   Residuals are allowed to covary at each time point.
+#
+# Arguments:
+#   T  = number of occasions
+#
+# Returns:
+#   A lavaan model string for the CLPM
+# ---------------------------------------------------------
+
+build_clpm <- function(T) {
+
+  # regression paths over time
+  regress_block <- paste(
+    unlist(lapply(2:T, function(t){
+      c(
+        sprintf("x%d ~ x%d + y%d", t, t-1, t-1),
+        sprintf("y%d ~ x%d + y%d", t, t-1, t-1)
+      )
+    })), collapse="\n"
+  )
+
+  # allow residual covariance x_t ~~ y_t
+  resid_cov <- paste(sprintf("x%d ~~ y%d", 1:T, 1:T), collapse="\n")
+
+  # allow variances x_t ~~ x_t and y_t ~~ y_t
+  resid_vars <- paste(
+    paste(sprintf("x%d ~~ x%d", 1:T, 1:T), collapse="\n"),
+    paste(sprintf("y%d ~~ y%d", 1:T, 1:T), collapse="\n"),
+    sep = "\n"
+  )
+
+  # freely estimate means
+  means_block <- paste(
+    paste(paste0("x",1:T), collapse=" + "), "~ 1\n",
+    paste(paste0("y",1:T), collapse=" + "), "~ 1\n"
+  )
+
+  paste(regress_block, resid_cov, resid_vars, means_block, sep="\n")
+}
+
+```
+
+##### 2.4.2 CLPM with confounder adjustment
+
+Next we include the models with confounder adjustment built into lavaan:
+
+```{r build CLPM with confounders function, eval=false, message=FALSE, warning=FALSE}
+
+# ---------------------------------------------------------
+# Function: build_clpm_with_Cs()
+# ---------------------------------------------------------
+# Purpose:
+#   Create a CLPM that includes all confounders (c1...ck)
+#   as additional predictors of every x_t and y_t.
+#
+# Arguments:
+#   T = number of occasions
+#   k = number of confounders
+#
+# Returns:
+#   A lavaan model string for the adjusted CLPM
+# ---------------------------------------------------------
+
+build_clpm_with_Cs <- function(T, k) {
+
+  # construct "c1 + c2 + ... + ck"
+  C_names <- paste0("c", 1:k, collapse=" + ")
+
+  # autoregressive and cross-lagged paths + confounders
+  regress_block <- paste(
+    unlist(lapply(2:T, function(t){
+      c(
+        sprintf("x%d ~ x%d + y%d + %s", t, t-1, t-1, C_names),
+        sprintf("y%d ~ x%d + y%d + %s", t, t-1, t-1, C_names)
+      )
+    })), collapse="\n"
+  )
+
+  # residual covariance x_t ~~ y_t
+  resid_cov <- paste(sprintf("x%d ~~ y%d", 1:T, 1:T), collapse="\n")
+
+  # residual variances
+  resid_vars <- paste(
+    paste(sprintf("x%d ~~ x%d", 1:T, 1:T), collapse="\n"),
+    paste(sprintf("y%d ~~ y%d", 1:T, 1:T), collapse="\n"),
+    sep = "\n"
+  )
+
+  # means
+  means_block <- paste(
+    paste(paste0("x",1:T), collapse=" + "), "~ 1\n",
+    paste(paste0("y",1:T), collapse=" + "), "~ 1\n"
+  )
+
+  paste(regress_block, resid_cov, resid_vars, means_block, sep="\n")
+}
+
+```
+
+### 2.4.3 RI-CLPM 
+
+Now onto the RI-CLPM:
+
+```{r build RI-CLPM function, eval=false, message=FALSE, warning=FALSE}
+
+# ---------------------------------------------------------
+# Function: build_riclpm()
+# ---------------------------------------------------------
+# Purpose:
+#   Create a RI-CLPM syntax string.
+#   The model separates stable person-level traits (ri)
+#   from within-person fluctuations (wx, wy).
+#
+# Arguments:
+#   T = number of occasions
+#
+# Returns:
+#   A lavaan model string for the RI-CLPM
+# ---------------------------------------------------------
+
+build_riclpm <- function(T) {
+
+  # random intercept factors
+  ri_block <- paste0(
+    "rix =~ ", paste(sprintf("1*x%d", 1:T), collapse=" + "), "\n",
+    "riy =~ ", paste(sprintf("1*y%d", 1:T), collapse=" + "), "\n",
+    "rix ~~ rix\n riy ~~ riy\n rix ~~ riy\n"
+  )
+
+  # fix residual variances to zero at the observed level
+  resid_fix <- paste0(
+    paste(sprintf("x%d ~~ 0*x%d", 1:T, 1:T), collapse="; "), "\n",
+    paste(sprintf("y%d ~~ 0*y%d", 1:T, 1:T), collapse="; "), "\n"
+  )
+
+  # within-person latent variables
+  within_lat <- paste0(
+    paste(sprintf("wx%d =~ 1*x%d", 1:T, 1:T), collapse="; "), "\n",
+    paste(sprintf("wy%d =~ 1*y%d", 1:T, 1:T), collapse="; "), "\n"
+  )
+
+  # orthogonality: RI factors uncorrelated with within-person factors
+  orth <- paste0(
+    "rix ~~ ", paste(sprintf("0*wx%d", 1:T), collapse=" + "), "\n",
+    "rix ~~ ", paste(sprintf("0*wy%d", 1:T), collapse=" + "), "\n",
+    "riy ~~ ", paste(sprintf("0*wx%d", 1:T), collapse=" + "), "\n",
+    "riy ~~ ", paste(sprintf("0*wy%d", 1:T), collapse=" + "), "\n"
+  )
+
+  # freely estimate within-person variances
+  within_var <- paste0(
+    paste(sprintf("wx%d ~~ wx%d", 1:T, 1:T), collapse="; "), "\n",
+    paste(sprintf("wy%d ~~ wy%d", 1:T, 1:T), collapse="; "), "\n"
+  )
+
+  # within-person contemporaneous covariance
+  within_cov <- paste0(
+    paste(sprintf("wy%d ~~ wx%d", 1:T, 1:T), collapse="; "), "\n"
+  )
+
+  # dynamic (cross-lagged + autoregressive) paths
+  regress <- paste(
+    unlist(lapply(2:T, function(t){
+      c(
+        sprintf("wx%d ~ wx%d + wy%d", t, t-1, t-1),
+        sprintf("wy%d ~ wx%d + wy%d", t, t-1, t-1)
+      )
+    })), collapse="\n"
+  )
+
+  # means across time
+  means <- paste0(
+    paste(paste0("x",1:T), collapse=" + "), " ~ mx*1\n",
+    paste(paste0("y",1:T), collapse=" + "), " ~ my*1\n"
+  )
+
+  paste(ri_block, resid_fix, within_lat, orth,
+        within_var, within_cov, regress, means, sep="\n")
+}
+
+```
+
+### 2.4.4 DPM
+
+and the DPM:
+
+```{r build DPM function, eval=false, message=FALSE, warning=FALSE}
+
+# ---------------------------------------------------------
+# Function: build_dpm()
+# ---------------------------------------------------------
+# Purpose:
+#   Build the dynamic panel model (DPM) used in Study 1.
+#
+#   FX loads on X2..XT
+#   FY loads on Y2..YT
+#
+#   FX and FY are allowed to correlate with X1, Y1.
+#   Each wave t > 1 is predicted from wave t-1:
+#       Xt   ~ Xt-1 + Yt-1
+#       Yt   ~ Xt-1 + Yt-1
+#
+#   Residual covariance X_t ~~ Y_t is freely estimated.
+#   All means are freely estimated.
+#
+# Arguments:
+#   T = number of waves (T ≥ 2)
+#
+# Returns:
+#   A lavaan model string for the dynamic panel model
+# ---------------------------------------------------------
+
+build_dpm <- function(T) {
+
+  # latent factors for slow processes (start at wave 2)
+  FX_block <- paste0(
+    "FX =~ ", paste(sprintf("1*x%d", 2:T), collapse=" + "), "\n"
+  )
+
+  FY_block <- paste0(
+    "FY =~ ", paste(sprintf("1*y%d", 2:T), collapse=" + "), "\n"
+  )
+
+  # allow FX and FY to relate to the first wave
+  fx_cov_block <- "FX ~~ x1 + y1\n"
+  fy_cov_block <- "FY ~~ x1 + y1\n"
+
+  # dynamic regression structure (lag-1)
+  regress_block <- paste(
+    unlist(lapply(2:T, function(t){
+      c(
+        sprintf("x%d ~ x%d + y%d", t, t-1, t-1),
+        sprintf("y%d ~ x%d + y%d", t, t-1, t-1)
+      )
+    })), collapse="\n"
+  )
+
+  # residual covariance at each wave
+  resid_cov_block <- paste(
+    sprintf("x%d ~~ y%d", 1:T, 1:T),
+    collapse="\n"
+  )
+
+  # latent factor covariances
+  latent_cov_block <- paste(
+    "FX ~~ FX",
+    "FY ~~ FY",
+    "FX ~~ FY",
+    sep="\n"
+  )
+
+  # residual variances for all observed variables
+  resid_var_block <- paste(
+    paste(sprintf("x%d ~~ x%d", 1:T, 1:T), collapse="\n"),
+    paste(sprintf("y%d ~~ y%d", 1:T, 1:T), collapse="\n"),
+    sep="\n"
+  )
+
+  # freely estimate means at each wave
+  means_block <- paste(
+    paste(sprintf("x%d", 1:T), collapse=" + "), "~ 1\n",
+    paste(sprintf("y%d", 1:T), collapse=" + "), "~ 1\n"
+  )
+
+  # combine all components into one model string
+  paste(
+    FX_block,
+    FY_block,
+    fx_cov_block,
+    fy_cov_block,
+    regress_block,
+    resid_cov_block,
+    latent_cov_block,
+    resid_var_block,
+    means_block,
+    sep="\n"
+  )
+}
+
+```
+
+
+### 2.4.5 Linear BCA residualizer
+and finally the linear BCA residualizer:
+
+```{r build linear BCA function, eval=false, message=FALSE, warning=FALSE}
+
+# ---------------------------------------------------------
+# Function: residualise_panel_linearC()
+# ---------------------------------------------------------
+# Purpose:
+#   Remove linear confounder effects from all observed
+#   x_t and y_t scores by regressing them on c1...ck.
+#   The residuals are then used in a standard CLPM.
+#
+# Arguments:
+#   df        = data frame with x1..xT, y1..yT, c1..ck
+#   x_prefix  = prefix for x variables
+#   y_prefix  = prefix for y variables
+#   c_prefix  = prefix for confounders
+#
+# Returns:
+#   A data frame where x_t and y_t are replaced by residuals
+# ---------------------------------------------------------
+
+residualise_panel_linearC <- function(df,
+                                      x_prefix = "x",
+                                      y_prefix = "y",
+                                      c_prefix = "c") {
+
+  df <- as.data.frame(df)
+
+  # detect names
+  x_cols <- grep(paste0("^", x_prefix, "\\d+$"), names(df), value=TRUE)
+  y_cols <- grep(paste0("^", y_prefix, "\\d+$"), names(df), value=TRUE)
+  c_cols <- grep(paste0("^", c_prefix, "\\d+$"), names(df), value=TRUE)
+
+  if (length(c_cols) == 0)
+    stop("No confounder columns found.")
+
+  # design matrix for confounders
+  C <- as.matrix(df[c_cols])
+
+  # residualise each x_t
+  for (x in x_cols)
+    df[[x]] <- resid(lm(df[[x]] ~ C))
+
+  # residualise each y_t
+  for (y in y_cols)
+    df[[y]] <- resid(lm(df[[y]] ~ C))
+
+  df
+}
+
+```
+
+## 2.5 Next we need some functions that fit the models
+
+The fitting functions for all aforementioned models are here all in one code chunck:
+
+```{r model fitting functions, eval=false, message=FALSE, warning=FALSE}
+
+# ---------------------------------------------------------
+# Function: fit_clpm()
+# ---------------------------------------------------------
+# Purpose:
+#   Fit the basic CLPM model using lavaan.
+#
+# Arguments:
+#   data         = data frame with x1..xT, y1..yT
+#   model_string = lavaan syntax from build_clpm()
+#
+# Returns:
+#   A lavaan fit object, or NULL on failure
+# ---------------------------------------------------------
+
+fit_clpm <- function(data, model_string) {
+  tryCatch(
+    lavaan::lavaan(model_string,
+                   data = as.data.frame(data),
+                   estimator = "MLR",
+                   warn = FALSE),
+    error = function(e) NULL
+  )
+}
+
+# ---------------------------------------------------------
+# Function: fit_riclpm()
+# ---------------------------------------------------------
+# Purpose:
+#   Fit the random-intercept CLPM.
+#
+# Arguments:
+#   data         = panel data frame
+#   model_string = lavaan syntax from build_riclpm()
+#
+# Returns:
+#   A lavaan fit object, or NULL on failure
+# ---------------------------------------------------------
+
+fit_riclpm <- function(data, model_string) {
+  tryCatch(
+    lavaan::lavaan(model_string,
+                   data = as.data.frame(data),
+                   estimator = "MLR",
+                   warn = FALSE),
+    error = function(e) NULL
+  )
+}
+
+# ---------------------------------------------------------
+# Function: fit_dpm()
+# ---------------------------------------------------------
+# Purpose:
+#   Fit the dynamic panel model (DPM) with slow processes FX, FY.
+#
+# Arguments:
+#   data         = panel data frame
+#   model_string = lavaan syntax from build_dpm()
+#
+# Returns:
+#   A lavaan fit object, or NULL on failure
+# ---------------------------------------------------------
+
+fit_dpm <- function(data, model_string) {
+  tryCatch(
+    lavaan::lavaan(model_string,
+                   data = as.data.frame(data),
+                   estimator = "MLR",
+                   warn = FALSE),
+    error = function(e) NULL
+  )
+}
+
+# ---------------------------------------------------------
+# Function: fit_clpm_with_Cs()
+# ---------------------------------------------------------
+# Purpose:
+#   Fit a CLPM where all confounders (c1..ck)
+#   are included as predictors for x_t and y_t.
+#
+# Arguments:
+#   data         = panel data with confounders
+#   model_string = lavaan syntax from build_clpm_with_Cs()
+#
+# Returns:
+#   A lavaan fit object, or NULL on failure
+# ---------------------------------------------------------
+
+fit_clpm_with_Cs <- function(data, model_string) {
+  tryCatch(
+    lavaan::lavaan(model_string,
+                   data = as.data.frame(data),
+                   estimator = "MLR",
+                   warn = FALSE),
+    error = function(e) NULL
+  )
+}
+
+# ---------------------------------------------------------
+# Function: fit_clpm_resid()
+# ---------------------------------------------------------
+# Purpose:
+#   Residualise x_t and y_t on the confounders (linear model),
+#   then fit a standard CLPM to the residualised data.
+#
+# Arguments:
+#   data         = full data frame with x, y, c
+#   model_string = lavaan syntax from build_clpm()
+#
+# Returns:
+#   A lavaan fit object, or NULL on failure
+# ---------------------------------------------------------
+
+fit_clpm_resid <- function(data, model_string) {
+
+  # remove confounder effects first
+  df_resid <- tryCatch(
+    residualise_panel_linearC(data),
+    error = function(e) NULL
+  )
+  if (is.null(df_resid)) return(NULL)
+
+  # fit the CLPM to the cleaned data
+  tryCatch(
+    lavaan::lavaan(model_string,
+                   data = df_resid,
+                   estimator = "MLR",
+                   warn = FALSE),
+    error = function(e) NULL
+  )
+}
+
+```
+
+## 2.6 Model output extraction function
+
+Of course, now we need to also define a function which extracts the relevant outputs from this model.
+
+```{r model output extraction function, eval=false, message=FALSE, warning=FALSE}
+
+# ---------------------------------------------------------
+# Function: extract_lagged_parameters()
+# ---------------------------------------------------------
+# Purpose:
+#   Extract all AR and cross-lagged coefficients from a
+#   fitted model (CLPM, RI-CLPM, DPM).
+#
+#   For CLPM / DPM:
+#       x_t ~ x_{t-1} + y_{t-1}
+#       y_t ~ x_{t-1} + y_{t-1}
+#
+#   For RI-CLPM:
+#       wx_t ~ wx_{t-1} + wy_{t-1}
+#       wy_t ~ wx_{t-1} + wy_{t-1}
+#
+# Arguments:
+#   fit        = lavaan fit object
+#   T          = number of waves
+#   model_type = "clpm", "riclpm", or "dpm"
+#
+# Returns:
+#   A list containing 4 numeric vectors:
+#     ar_x[t]  = x_t <- x_{t-1}
+#     ar_y[t]  = y_t <- y_{t-1}
+#     xy[t]    = y_t <- x_{t-1}
+#     yx[t]    = x_t <- y_{t-1}
+#
+#   Each vector has length T-1, indexed by t = 2..T.
+# ---------------------------------------------------------
+
+extract_lagged_parameters <- function(
+    fit,
+    T,
+    model_type = c("clpm", "riclpm", "dpm")
+){
+  model_type <- match.arg(model_type)
+
+  if (is.null(fit)) {
+    return(list(
+      ar_x = rep(NA, T-1),
+      ar_y = rep(NA, T-1),
+      xy   = rep(NA, T-1),
+      yx   = rep(NA, T-1)
+    ))
+  }
+
+  pe <- tryCatch(lavaan::parameterEstimates(fit), error=function(e) NULL)
+  if (is.null(pe)) {
+    return(list(
+      ar_x = rep(NA, T-1),
+      ar_y = rep(NA, T-1),
+      xy   = rep(NA, T-1),
+      yx   = rep(NA, T-1)
+    ))
+  }
+
+  # variable prefixes: raw or RI-style
+  if (model_type == "riclpm") {
+    xvar <- "wx"
+    yvar <- "wy"
+  } else {
+    xvar <- "x"
+    yvar <- "y"
+  }
+
+  # helper to find an estimate in pe
+  grab <- function(lhs, rhs){
+    ix <- which(pe$lhs == lhs & pe$rhs == rhs)
+    if (length(ix) == 0) return(NA)
+    pe$est[ix[1]]
+  }
+
+  # initialize output vectors
+  ar_x <- numeric(T-1)
+  ar_y <- numeric(T-1)
+  xy   <- numeric(T-1)
+  yx   <- numeric(T-1)
+
+  # loop over waves 2..T
+  for (t in 2:T) {
+    # AR coefficients
+    ar_x[t-1] <- grab(paste0(xvar, t), paste0(xvar, t-1))
+    ar_y[t-1] <- grab(paste0(yvar, t), paste0(yvar, t-1))
+
+    # cross-lag X → Y
+    xy[t-1]   <- grab(paste0(yvar, t), paste0(xvar, t-1))
+
+    # cross-lag Y → X
+    yx[t-1]   <- grab(paste0(xvar, t), paste0(yvar, t-1))
+  }
+
+  list(
+    ar_x = ar_x,
+    ar_y = ar_y,
+    xy   = xy,
+    yx   = yx
+  )
+}
+
+```
+
+## 2.7 wrappers
+
+First we need a wrapper function to run one simulation iteration for a given scenario:
+
+```{r simulation iteration wrapper function, eval=false, message=FALSE, warning=FALSE}
+
+############################################################
+##  LIBRARIES
+############################################################
+
+library(mvtnorm)
+library(lavaan)
+library(tidyverse)
+library(parallel)
+library(pbapply)
+
+############################################################
+##  ONE REPLICATION: STUDY 1 (ALL 5 SCENARIOS)
+############################################################
+
+run_one_rep_study1 <- function(
+  rep_id,
+  N,
+  T,
+  k,                 # number of linear confounders
+  R2_1,              # total confounder R^2 at t = 1
+  scenarios,         # vector of scenario names (lowercase)
+  target_sd,         # SD of beta variation over time
+  ar,                # true AR (x_t <- x_{t-1})
+  cross,             # true cross-lag (y_t <- x_{t-1})
+  rho,               # innovation correlation
+  model_clpm,
+  model_riclpm,
+  model_dpm,
+  model_clpm_with_Cs,
+  base_seed = 12345
+){
+
+  set.seed(base_seed + rep_id)
+
+  ## --- 1. Sample baseline B and re-use across all scenarios ----------------
+
+  B1 <- sample_B_linear(
+    k    = k,
+    R2_1 = R2_1
+  )
+
+  # helper: pretty labels for plotting
+  pretty_scen <- function(scen) {
+    dplyr::recode(
+      scen,
+      "constant"   = "Constant",
+      "linear"     = "Linear",
+      "sinusoidal" = "Sinusoidal",
+      "stepwise"   = "Stepwise",
+      "random_walk"= "Random Walk",
+      .default     = scen
+    )
+  }
+
+  ## --- 2. Loop over scenarios and collect results --------------------------
+
+  out_list <- vector("list", length(scenarios))
+
+  for (j in seq_along(scenarios)) {
+
+    scen <- scenarios[j]
+
+    ## 2.1 Build B_t trajectory for this scenario
+    B_list <- generate_B_trajectory(
+      B1        = B1,
+      T         = T,
+      scenario  = scen,
+      target_sd = target_sd
+    )
+
+    # beta as vectors (list-columns per occasion)
+    beta_full <- lapply(B_list, function(Bt) as.numeric(Bt))      # length 2*k
+    beta_X    <- lapply(B_list, function(Bt) as.numeric(Bt[1,]))  # length k
+    beta_Y    <- lapply(B_list, function(Bt) as.numeric(Bt[2,]))  # length k
+
+    ## 2.2 Simulate panel for this scenario
+
+    df <- tryCatch(
+      simulate_panel_data(
+        N      = N,
+        T      = T,
+        B_list = B_list,
+        ar     = ar,
+        cross  = cross,
+        rho    = rho
+      ),
+      error = function(e) NULL
+    )
+
+    # if simulation blew up completely → NA block for this scenario
+    if (is.null(df)) {
+      out_list[[j]] <- data.frame(
+        run        = rep(rep_id, T),
+        occasion   = 1:T,
+        scenario   = pretty_scen(scen),
+
+        beta       = I(beta_full),
+        beta_X     = I(beta_X),
+        beta_Y     = I(beta_Y),
+
+        true_cross = cross,
+        true_auto  = ar,
+
+        est_CLPM        = NA_real_,
+        est_RI_CLPM     = NA_real_,
+        est_DPM         = NA_real_,
+        est_CLPM_LBCA   = NA_real_,
+        est_CLPM_Adj    = NA_real_,
+
+        estA_CLPM       = NA_real_,
+        estA_RI_CLPM    = NA_real_,
+        estA_DPM        = NA_real_,
+        estA_CLPM_LBCA  = NA_real_,
+        estA_CLPM_Adj   = NA_real_,
+
+        fail_CLPM       = TRUE,
+        fail_RI_CLPM    = TRUE,
+        fail_DPM        = TRUE,
+        fail_CLPM_LBCA  = TRUE,
+        fail_CLPM_Adj   = TRUE,
+
+        is_na_run       = 1L
+      )
+      next
+    }
+
+    ## 2.3 Stationarity check: any Var(x_t) or Var(y_t) > 1? -----------------
+
+    var_xy <- apply(df[, 1:(2*T)], 2, var)
+    # small tolerance for numerical noise
+    if (any(var_xy > 1 + 1e-3, na.rm = TRUE)) {
+
+      out_list[[j]] <- data.frame(
+        run        = rep(rep_id, T),
+        occasion   = 1:T,
+        scenario   = pretty_scen(scen),
+
+        beta       = I(beta_full),
+        beta_X     = I(beta_X),
+        beta_Y     = I(beta_Y),
+
+        true_cross = cross,
+        true_auto  = ar,
+
+        est_CLPM        = NA_real_,
+        est_RI_CLPM     = NA_real_,
+        est_DPM         = NA_real_,
+        est_CLPM_LBCA   = NA_real_,
+        est_CLPM_Adj    = NA_real_,
+
+        estA_CLPM       = NA_real_,
+        estA_RI_CLPM    = NA_real_,
+        estA_DPM        = NA_real_,
+        estA_CLPM_LBCA  = NA_real_,
+        estA_CLPM_Adj   = NA_real_,
+
+        fail_CLPM       = TRUE,
+        fail_RI_CLPM    = TRUE,
+        fail_DPM        = TRUE,
+        fail_CLPM_LBCA  = TRUE,
+        fail_CLPM_Adj   = TRUE,
+
+        is_na_run       = 1L
+      )
+      next
+    }
+
+    ## 2.4 Fit all five models -----------------------------------------------
+
+    # 1) CLPM (raw)
+    fit_clpm_raw <- tryCatch(
+      fit_clpm(df, model_clpm),
+      error = function(e) NULL
+    )
+
+    # 2) RI-CLPM
+    fit_ric <- tryCatch(
+      fit_riclpm(df, model_riclpm),
+      error = function(e) NULL
+    )
+
+    # 3) DPM
+    fit_dpm0 <- tryCatch(
+      fit_dpm(df, model_dpm),
+      error = function(e) NULL
+    )
+
+    # 4) CLPM + Cs as covariates (per-occasion adjustment)
+    fit_adj <- tryCatch(
+      fit_clpm_with_Cs(df, model_clpm_with_Cs),
+      error = function(e) NULL
+    )
+
+    # 5) CLPM after residualising on Cs (BCASM)
+    fit_lbca <- tryCatch(
+      fit_clpm_resid(df, model_clpm),
+      error = function(e) NULL
+    )
+
+    ## 2.5 Extract AR + cross-lags per model --------------------------------
+
+    lag_raw  <- extract_lagged_parameters(fit_clpm_raw, T, "clpm")
+    lag_ric  <- extract_lagged_parameters(fit_ric,       T, "riclpm")
+    lag_dpm0 <- extract_lagged_parameters(fit_dpm0,      T, "dpm")
+    lag_adj  <- extract_lagged_parameters(fit_adj,       T, "clpm")
+    lag_lbca <- extract_lagged_parameters(fit_lbca,      T, "clpm")
+
+    fail_CLPM      <- is.null(fit_clpm_raw)
+    fail_RI_CLPM   <- is.null(fit_ric)
+    fail_DPM       <- is.null(fit_dpm0)
+    fail_CLPM_Adj  <- is.null(fit_adj)
+    fail_CLPM_LBCA <- is.null(fit_lbca)
+
+    ## 2.6 Assemble long-format output (T rows, this scenario) --------------
+
+    out_list[[j]] <- data.frame(
+      run        = rep(rep_id, T),
+      occasion   = 1:T,
+      scenario   = pretty_scen(scen),
+
+      beta       = I(beta_full),
+      beta_X     = I(beta_X),
+      beta_Y     = I(beta_Y),
+
+      true_cross = cross,
+      true_auto  = ar,
+
+      # cross-lag X->Y (NA at t = 1)
+      est_RI_CLPM   = c(NA, lag_ric$xy),
+      est_DPM       = c(NA, lag_dpm0$xy),
+      est_CLPM      = c(NA, lag_raw$xy),
+      est_CLPM_LBCA = c(NA, lag_lbca$xy),
+      est_CLPM_Adj  = c(NA, lag_adj$xy),
+
+      # AR for X (NA at t = 1)
+      estA_RI_CLPM   = c(NA, lag_ric$ar_x),
+      estA_DPM       = c(NA, lag_dpm0$ar_x),
+      estA_CLPM      = c(NA, lag_raw$ar_x),
+      estA_CLPM_LBCA = c(NA, lag_lbca$ar_x),
+      estA_CLPM_Adj  = c(NA, lag_adj$ar_x),
+
+      fail_CLPM       = fail_CLPM,
+      fail_RI_CLPM    = fail_RI_CLPM,
+      fail_DPM        = fail_DPM,
+      fail_CLPM_LBCA  = fail_CLPM_LBCA,
+      fail_CLPM_Adj   = fail_CLPM_Adj,
+
+      is_na_run = as.integer(
+        all(is.na(c(lag_raw$xy,
+                    lag_ric$xy,
+                    lag_dpm0$xy,
+                    lag_adj$xy,
+                    lag_lbca$xy)))
+      )
+    )
+  }
+
+  # bind scenarios for this run
+  dplyr::bind_rows(out_list)
+}
+
+
+```
+
+and then a function to iteratively call this wrapper for multiple simulation repetitions:
+
+```{r multiple replication wrapper function, eval=false, message=FALSE, warning=FALSE}
+
+############################################################
+##  MAIN SIMULATION: STUDY 1 (LINEAR ONLY, LONG OUTPUT)
+############################################################
+
+run_simulation_study1 <- function(
+  reps      = 200,
+  N         = 1000,
+  T         = 5,
+  k         = 3,
+  R2_1      = 0.20,
+  scenarios = c("constant","linear","sinusoidal","stepwise","random_walk"),
+  target_sd = 0.10,
+  ar        = 0.25,
+  cross     = 0.10,
+  rho       = 0.15,
+  cores     = max(1, parallel::detectCores() - 1),
+  base_seed = 12345
+){
+
+  # match/validate scenario names (allows subsets if you want)
+  scenarios <- match.arg(scenarios,
+                         choices = c("constant","linear","sinusoidal",
+                                     "stepwise","random_walk"),
+                         several.ok = TRUE)
+
+  start_time <- Sys.time()
+
+  ## 1. Build model strings once (on the master) -----------------------------
+
+  model_clpm          <- build_clpm(T)
+  model_riclpm        <- build_riclpm(T)
+  model_dpm           <- build_dpm(T)
+  model_clpm_with_Cs  <- build_clpm_with_Cs(T, k)
+
+  tasks <- 1:reps
+
+  ## 2. Start cluster --------------------------------------------------------
+
+  cl <- parallel::makeCluster(cores)
+
+  ## 3. Export everything needed to workers ---------------------------------
+
+  parallel::clusterExport(
+    cl,
+    c(
+      "sample_B_linear",
+      "generate_B_trajectory",
+      "simulate_panel_data",
+
+      "build_clpm",
+      "build_riclpm",
+      "build_dpm",
+      "build_clpm_with_Cs",
+
+      "fit_clpm",
+      "fit_riclpm",
+      "fit_dpm",
+      "fit_clpm_with_Cs",
+      "fit_clpm_resid",
+
+      "residualise_panel_linearC",
+      "extract_lagged_parameters",
+      "run_one_rep_study1",
+
+      # fixed scalar arguments:
+      "N","T","k","R2_1","scenarios","target_sd",
+      "ar","cross","rho",
+      "model_clpm","model_riclpm","model_dpm","model_clpm_with_Cs",
+      "base_seed"
+    ),
+    envir = environment()
+  )
+
+  ## 4. Load packages on workers --------------------------------------------
+
+  parallel::clusterEvalQ(cl, {
+    library(mvtnorm)
+    library(lavaan)
+  })
+
+  ## 5. Parallel loop with pbapply progress bar -----------------------------
+
+  res_list <- pbapply::pblapply(
+    X  = tasks,
+    cl = cl,
+    FUN = function(rid) {
+      run_one_rep_study1(
+        rep_id           = rid,
+        N                = N,
+        T                = T,
+        k                = k,
+        R2_1             = R2_1,
+        scenarios        = scenarios,
+        target_sd        = target_sd,
+        ar               = ar,
+        cross            = cross,
+        rho              = rho,
+        model_clpm       = model_clpm,
+        model_riclpm     = model_riclpm,
+        model_dpm        = model_dpm,
+        model_clpm_with_Cs = model_clpm_with_Cs,
+        base_seed        = base_seed
+      )
+    }
+  )
+
+  parallel::stopCluster(cl)
+
+  raw_df  <- dplyr::bind_rows(res_list)
+  runtime <- Sys.time() - start_time
+
+  attr(raw_df, "runtime") <- runtime
+  raw_df
+}
+
+
+```
+
+## 2.8 Running a simulation function
+
+Even though we have defined all code above, debugging that is a huge pain in the ass (mainly caused by the parralell exectution). The true code that generates the results is stored in a script. Do note that it works the same. 
+
+```{r run simulation example}
+
+# get the functions
+source("C:/Users/Admin/Desktop/UU/Thesis umbrella/Thesis/Code/Qmd_Rmd_R_Pyth/Sim Studies/Sim_Study_1_forqmd.R")
+
+# create the output
+out_long <- run_simulation_study1(
+  reps      = 250,
+  N         = 1000,
+  T         = 5,
+  k         = 3,
+  R2_1      = 0.25,
+  target_sd = 0.15,
+  ar        = 0.2,
+  cross     = 0.10,
+  rho       = 0.15
+)
+
+# save the output as a dataframe
+saveRDS(
+  out_long,
+  file = "C:/Users/Admin/Desktop/UU/Thesis umbrella/Thesis/Code/Data/out_long_study1.rds"
+)
+
+```
+
+## 2.9 Making the plots
+
+Now we make the plots we discussed earlier:
+
+* Plot 1: 
+
+```{r }
+
+# read the rds file
+df <- readRDS("C:/Users/Admin/Desktop/UU/Thesis umbrella/Thesis/Code/Data/out_long_study1.rds")
+str(df)
+
+
+# colours
+blue_magenta <- c(
+  "#3B4CC0",  
+  "#5E60CE",
+  "#7A70D1",
+  "#9775D3",
+  "#B67BD2",
+  "#D084CF",
+  "#E28FC4",
+  "#F29BC1",
+  "#FF9ACD"
+)
+
+method_colors <- c(
+  "RI_CLPM"   = "#3B4CC0",
+  "DPM"       = "#5E60CE",
+  "CLPM"      = "#7A70D1",
+  "CLPM_LBCA" = "#B67BD2",
+  "CLPM_Adj"  = "#EE3A8C"
+)
+
+# extend colours to number of runs
+n_runs <- length(unique(df$run))
+blue_magenta_extended <- rep(blue_magenta, length.out = n_runs)
+plot_beta_X <- df %>%
+  mutate(beta_X = map_dbl(beta_X, ~ .x)) %>%
+  ggplot(aes(x = occasion, y = beta_X,
+             group = run, color = factor(run))) +
+  geom_line(linewidth = 0.7, alpha = 0.9) +
+  facet_wrap(~ scenario) +
+  scale_color_manual(values = blue_magenta_extended) +
+  guides(color = "none") +
+  labs(x = "Occasion", y = "Effect of Confounder on X") +
+  theme_minimal()
+
+plot_beta_X
+
+plot_beta_Y <- df %>%
+  mutate(beta_Y = map_dbl(beta_Y, ~ .x)) %>%
+  ggplot(aes(x = occasion, y = beta_Y,
+             group = run, color = factor(run))) +
+  geom_line(linewidth = 0.7, alpha = 0.9) +
+  facet_wrap(~ scenario) +
+  scale_color_manual(values = blue_magenta_extended) +
+  guides(color = "none") +
+  labs(x = "Occasion", y = "Effect of Confounder on Y") +
+  theme_minimal()
+
+plot_beta_Y
+
+plot_R2_X <- df %>%
+  mutate(beta_X = map_dbl(beta_X, ~ .x),
+         R2_X = beta_X^2) %>%
+  ggplot(aes(x = occasion, y = R2_X,
+             group = run, color = factor(run))) +
+  geom_line(linewidth = 0.7, alpha = 0.9) +
+  facet_wrap(~ scenario) +
+  scale_color_manual(values = blue_magenta_extended) +
+  guides(color = "none") +
+  labs(x = "Occasion", y = expression(R^2 ~ "(confounder → X)")) +
+  theme_minimal()
+
+plot_R2_X
+
+plot_bias_cross <- df %>%
+  mutate(
+    rb_RI_CLPM   = abs(est_RI_CLPM   - true_cross) / true_cross,
+    rb_DPM       = abs(est_DPM       - true_cross) / true_cross,
+    rb_CLPM      = abs(est_CLPM      - true_cross) / true_cross,
+    rb_CLPM_LBCA = abs(est_CLPM_LBCA - true_cross) / true_cross,
+    rb_CLPM_Adj  = abs(est_CLPM_Adj  - true_cross) / true_cross
+  ) %>%
+  pivot_longer(
+    starts_with("rb_"),
+    names_to = "method",
+    values_to = "rel_bias"
+  ) %>%
+  mutate(method = gsub("rb_", "", method),
+         method = factor(method, levels = names(method_colors))) %>%
+  group_by(scenario, method, occasion) %>%
+  summarise(mean_bias = mean(rel_bias, na.rm = TRUE), .groups = "drop") %>%
+  ggplot(aes(x = occasion, y = mean_bias,
+             color = method, group = method)) +
+  geom_point(size = 2) +
+  geom_line(linewidth = 0.8) +
+  facet_grid(method ~ scenario) +
+  scale_color_manual(values = method_colors) +
+  theme_minimal() +
+  labs(x = "Occasion", y = "Mean Relative Bias (Cross-Lagged)")
+
+plot_bias_cross
+
+plot_se_cross <- df %>%
+  mutate(
+    rb_RI_CLPM   = abs(est_RI_CLPM   - true_cross) / true_cross,
+    rb_DPM       = abs(est_DPM       - true_cross) / true_cross,
+    rb_CLPM      = abs(est_CLPM      - true_cross) / true_cross,
+    rb_CLPM_LBCA = abs(est_CLPM_LBCA - true_cross) / true_cross,
+    rb_CLPM_Adj  = abs(est_CLPM_Adj  - true_cross) / true_cross
+  ) %>%
+  pivot_longer(
+    starts_with("rb_"),
+    names_to = "method",
+    values_to = "rel_bias"
+  ) %>%
+  mutate(method = gsub("rb_", "", method),
+         method = factor(method, levels = names(method_colors))) %>%
+  group_by(scenario, method, occasion) %>%
+  summarise(se_bias = sd(rel_bias, na.rm = TRUE), .groups = "drop") %>%
+  ggplot(aes(x = occasion, y = se_bias,
+             color = method, group = method)) +
+  geom_point(size = 2) +
+  geom_line(linewidth = 0.8) +
+  facet_grid(method ~ scenario) +
+  scale_color_manual(values = method_colors) +
+  theme_minimal() +
+  labs(x = "Occasion", y = "Empirical SE (Cross-Lagged)")
+
+plot_se_cross
+
+plot_summary <- df %>%
+  select(scenario, run, starts_with("est_"), true_cross) %>%
+  pivot_longer(
+    starts_with("est_"),
+    names_to = "method",
+    values_to = "estimate"
+  ) %>%
+  mutate(method = gsub("est_", "", method),
+         method = factor(method, levels = names(method_colors))) %>%
+  group_by(scenario, method) %>%
+  summarise(
+    mean_est = mean(estimate, na.rm = TRUE),
+    sd_est   = sd(estimate,   na.rm = TRUE),
+    true_val = unique(true_cross),
+    .groups = "drop"
+  ) %>%
+  ggplot(aes(x = method, y = mean_est, color = method)) +
+  geom_point(size = 2.5) +
+  geom_errorbar(aes(ymin = mean_est - sd_est,
+                    ymax = mean_est + sd_est),
+                width = 0.15, linewidth = 0.8) +
+  geom_hline(aes(yintercept = true_val), linetype = "dashed") +
+  facet_grid(scenario ~ .) +
+  scale_color_manual(values = method_colors) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 25, hjust = 1),
+    legend.position = "none"
+  ) +
+  labs(x = "Method", y = "Estimated Cross-Lagged Effect")
+
+plot_summary
+
+```
+
+# 3. SImulation study 2
+
+## 3.8 Running the simulation function
+
+```{r}
+
+# load the simulation engine
+source("C:/Users/Admin/Desktop/UU/Thesis umbrella/Thesis/Code/Qmd_Rmd_R_Pyth/Sim Studies/Sim_Study_2_forqmd.R")
+
+out_long <- run_simulation_study2(
+  reps      = 10,
+  N         = 1000,
+  T         = 5,
+  k_lin     = 3,
+  ax        = 0.25,
+  ay        = 0.25,
+  bx        = 0.10,
+  by        = 0.10,
+  rho       = 0.15,
+  R2_1      = 0.25,
+  eta_1     = 0.40,
+  target_sd = 0.10,
+  rw_sd     = 0.10,
+  cores     = 6,
+  base_seed = 12345
+)
+
+# save the results
+saveRDS(
+  out_long,
+  file = "C:/Users/Admin/Desktop/UU/Thesis umbrella/Thesis/Code/Data/out_long_study2.rds"
+)
+
+```
+
+## 3.9 Making the plots
+
+```{r}
+
+df <- readRDS("C:/Users/Admin/Desktop/UU/Thesis umbrella/Thesis/Code/Data/out_long_study2.rds")
+str(df)
+
+library(tidyverse)
+
+
+
+
+```

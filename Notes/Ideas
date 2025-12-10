@@ -68,3 +68,5 @@ as a maximum, and then if we hit the maximum, anything sampled above the maximum
 When simulating data with only 2 time-points, the bias seems to not depend on the variance of the parameters at all. Is this because the 
 RI-CLPM can always fit a perfect line through 2 points, no matter what the variance is?
 
+### Idea 11 ###   
+We train a CV model only for the first run of simulation study, and then just use those hyperparameters. 
