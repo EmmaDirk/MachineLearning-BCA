@@ -21,12 +21,12 @@ Psi <- diag(3)                     # uncorrelated confounders with var=1
 
 # run the simulation
 results_s1 <- run_simulation_study1(
-  reps          = 2000,                        # number of replications
+  reps          = 100,                         # number of replications
   N             = 1000,                        # sample size
   T             = 5,                           # number of waves
   k             = 3,                           # number of confounders
-  R2_1          = 0.25,                        # confounder R2 at wave 1
-  target_sd     = 0.1,                         # SD of B(t) variation
+  R2_1          = 0.2,                         # confounder R2 at wave 1
+  target_sd     = 0.25,                        # SD of B(t) variation
   scenarios     = c("constant", "stepwise"),   # scenarios to run
   A             = A,                           # 2×2 AR + cross-lag matrix
   Psi           = Psi,                         # confounder covariance
@@ -44,7 +44,7 @@ Now, let's visualize the results for simulation study 1.
 ```{r sim study 1 visualization}
 
 # representation of the dataframe 
-df <- results_s1 
+df <- results_s1
 head(df)
 
 # custom colour palette
@@ -654,5 +654,174 @@ plot_box_crosslag_Y # (on X)
 # summary plot of mean absolute bias of autoregressive estimates
 plot_box_ar_X
 plot_box_ar_Y
+
+```
+
+Now lets proceed to simulation study 2. We will again source the required functions and run the simulation.
+
+```{r}
+
+# load the required functions and dependencies
+source("Thesis\\Code\\Qmd_Rmd_R_Pyth\\Sim Studies\\Sim_Study_2_RR.R")
+
+# autoregressive + cross-lag structure
+A <- matrix(c(
+  0.20, 0,                         # autoregressive and cross-lag for Y
+  0.10, 0.20                       # cross-lag and autoregressive for X
+), nrow = 2, byrow = TRUE)
+
+# confounder covariance (3 confounders)
+Psi <- diag(3)                     # uncorrelated confounders with var=1
+
+# run the simulation
+results_s2 <- run_simulation_study2(
+  reps          = 100,                         # number of replications
+  N             = 1000,                        # sample size
+  T             = 5,                           # number of waves
+  k             = 3,                           # number of confounders
+  R2_1          = 0.2,                         # confounder R2 at wave 1
+  eta_1         = 0.50,                        # share of R2 due to non-linear confounding
+  target_sd     = 0.25,                        # SD of B(t) variation
+  scenarios     = c("constant", "stepwise"),   # scenarios to run
+  A             = A,                           # 2×2 AR + cross-lag matrix
+  Psi           = Psi,                         # confounder covariance
+  rho_extra     = 0.15,                        # extra X–Y covariance
+  models_to_run = c("clpm","riclpm",           # 5 modeling approaches 
+                    "dpm","lbca","adj"),
+  cores         = 7,                           # number of cores to use
+  base_seed     = 12345                        # reproducible base seed
+)
+
+```
+
+And now visualise the results for simulation study 2.
+
+
+```{r}
+
+df <- results_s2
+
+###############################################################################
+# plot 3: show the mean absolute bias of the different models 
+###############################################################################
+
+# true effects extracted from A
+true_xy <- A[2,1]   # XY (CL)
+true_yx <- A[1,2]   # YX (CL)
+true_ax <- A[1,1]   # X (AR)
+true_ay <- A[2,2]   # Y (AR)
+
+# cross-lagged estimates mean absolute bias X on Y 
+bias_XY <- df %>%
+  select(run, occasion, scenario, starts_with("estXY_")) %>%
+  
+  # long format
+  pivot_longer(
+    cols      = starts_with("estXY_"),
+    names_to  = "model",
+    values_to = "estimate"
+  ) %>%
+  
+  # compute absolute bias
+  mutate(abs_bias = abs(estimate - true_xy)) %>%
+  
+  # compute mean absolute bias per scenario × model × occasion
+  group_by(scenario, model, occasion) %>%
+  summarise(mean_abs_bias = mean(abs_bias, na.rm = TRUE),
+            .groups = "drop")
+
+# same but for YX
+bias_YX <- df %>%
+  select(run, occasion, scenario, starts_with("estYX_")) %>%
+  pivot_longer(
+    cols      = starts_with("estYX_"),
+    names_to  = "model",
+    values_to = "estimate"
+  ) %>%
+  mutate(abs_bias = abs(estimate - true_yx)) %>%
+  group_by(scenario, model, occasion) %>%
+  summarise(mean_abs_bias = mean(abs_bias, na.rm = TRUE),
+            .groups = "drop")
+
+# compute mean absolute bias for AR(X)
+bias_AX <- df %>%
+  select(run, occasion, scenario,
+         estA_CLPM, estA_RI_CLPM, estA_DPM,
+         estA_CLPM_Adj, estA_CLPM_LBCA, estA_CLPM_XGB) %>%
+  
+  pivot_longer(
+    cols      = starts_with("estA_"),
+    names_to  = "model",
+    values_to = "estimate"
+  ) %>%
+  
+  mutate(abs_bias = abs(estimate - true_ax)) %>%
+  
+  group_by(scenario, model, occasion) %>%
+  summarise(mean_abs_bias = mean(abs_bias, na.rm = TRUE),
+            .groups = "drop")
+
+# compute mean absolute bias for AR(Y)
+bias_AY <- df %>%
+  select(run, occasion, scenario,
+         estAY_CLPM, estAY_RI_CLPM, estAY_DPM,
+         estAY_CLPM_Adj, estAY_CLPM_LBCA, estAY_CLPM_XGB) %>%
+  
+  pivot_longer(
+    cols      = starts_with("estAY_"),
+    names_to  = "model",
+    values_to = "estimate"
+  ) %>%
+  
+  mutate(abs_bias = abs(estimate - true_ay)) %>%
+  
+  group_by(scenario, model, occasion) %>%
+  summarise(mean_abs_bias = mean(abs_bias, na.rm = TRUE),
+            .groups = "drop")
+
+###############################################################################
+# plot 4: the empirical standard error of the estimates over time
+###############################################################################
+
+# empirical SE for AR(X)
+se_AR_X <- df %>%
+  select(run, occasion, scenario,
+         estA_CLPM, estA_RI_CLPM, estA_DPM,
+         estA_CLPM_Adj, estA_CLPM_LBCA, estA_CLPM_XGB) %>%
+  
+  pivot_longer(
+    cols = starts_with("estA_"),
+    names_to = "model",
+    values_to = "estimate"
+  ) %>%
+  
+  group_by(scenario, model, occasion) %>%
+  summarise(
+    emp_se = sd(estimate, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# empirical SE for AR(Y)
+se_AR_Y <- df %>%
+  select(run, occasion, scenario,
+         estAY_CLPM, estAY_RI_CLPM, estAY_DPM,
+         estAY_CLPM_Adj, estAY_CLPM_LBCA, estAY_CLPM_XGB) %>%
+  
+  pivot_longer(
+    cols = starts_with("estAY_"),
+    names_to = "model",
+    values_to = "estimate"
+  ) %>%
+  
+  group_by(scenario, model, occasion) %>%
+  summarise(
+    emp_se = sd(estimate, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# plots
+plot_bias_XY
+plot_bias_YX
+plot_
 
 ```
