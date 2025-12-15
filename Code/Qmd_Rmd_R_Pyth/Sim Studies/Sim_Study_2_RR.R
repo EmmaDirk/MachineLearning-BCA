@@ -724,6 +724,7 @@ build_dpm <- function(T) {
 # we decouple the confounder adjustment from the model fitting by residualising all X and Y variables against the confounders
 # this is called Baseline Covariate Adjustment (BCA)
 residualise_panel_linearC <- function(df,
+                                      k,
                                       x_prefix = "x",
                                       y_prefix = "y",
                                       c_prefix = "c") {
@@ -732,13 +733,19 @@ residualise_panel_linearC <- function(df,
   df <- as.data.frame(df)
   
   # get column names
-  x_cols <- grep(paste0("^", x_prefix, "\\d+$"), names(df), value=TRUE)
-  y_cols <- grep(paste0("^", y_prefix, "\\d+$"), names(df), value=TRUE)
-  c_cols <- grep(paste0("^", c_prefix, "\\d+$"), names(df), value=TRUE)
+  x_cols <- grep(paste0("^", x_prefix, "\\d+$"), names(df), value = TRUE)
+  y_cols <- grep(paste0("^", y_prefix, "\\d+$"), names(df), value = TRUE)
+
+  # IMPORTANT: only use linear confounders (c1 ... ck)
+  c_cols <- paste0(c_prefix, 1:k)
 
   # stop if no confounders found
   if (length(c_cols) == 0)
     stop("No confounder columns found.")
+
+  # stop if some confounders are missing
+  if (any(!c_cols %in% names(df)))
+    stop("Not all linear confounder columns found (c1..ck).")
 
   # convert confounders to matrix
   C <- as.matrix(df[c_cols])
@@ -762,14 +769,10 @@ residualise_panel_linearC <- function(df,
 # note that the model still only 'sees' the linear confounders, but since those are deterministically related 
 # to the non-linear confounders, the Xgb model can in theory learn these non-linear relationships
 residualise_panel_xgb <- function(df,
+                                  k,
                                   x_prefix = "x",
                                   y_prefix = "y",
-                                  c_prefix = "c",
-                                  nrounds = 100,
-                                  max_depth = 4,
-                                  eta = 0.1,
-                                  subsample = 0.8,
-                                  colsample_bytree = 1) {
+                                  c_prefix = "c") {
 
   # convert to data frame
   df <- as.data.frame(df)
@@ -777,14 +780,23 @@ residualise_panel_xgb <- function(df,
   # get column names
   x_cols <- grep(paste0("^", x_prefix, "\\d+$"), names(df), value = TRUE)
   y_cols <- grep(paste0("^", y_prefix, "\\d+$"), names(df), value = TRUE)
-  c_cols <- grep(paste0("^", c_prefix, "\\d+$"), names(df), value = TRUE)
+
+  # only linear confounders are observed
+  c_cols <- paste0(c_prefix, 1:k)
 
   # stop if no confounders found
   if (length(c_cols) == 0)
     stop("No confounder columns found.")
 
-  # confounder matrix
-  C <- as.matrix(df[c_cols])
+  # confounder matrix (standardised for XGB stability)
+  C <- scale(as.matrix(df[c_cols]))
+
+  # pull tuned settings
+  if (!exists("XGB_TUNED", inherits = TRUE) || is.null(XGB_TUNED))
+    stop("XGB_TUNED not found. Tune once before calling residualise_panel_xgb().")
+
+  nrounds_tuned <- XGB_TUNED$nrounds
+  params_tuned  <- XGB_TUNED$params
 
   # helper: fit xgboost and return residuals
   xgb_resid <- function(y) {
@@ -794,38 +806,28 @@ residualise_panel_xgb <- function(df,
 
     # fit
     fit <- xgboost::xgb.train(
-
-      # the data
       data = dtrain,
+      nrounds = nrounds_tuned,
+      params = c(
+        list(
+          objective = "reg:squarederror",
+          eval_metric = "rmse",
+          booster   = "gbtree",
+          tree_method = "hist",
 
-      # number of boosting rounds
-      nrounds = nrounds,
-
-      # parameters
-      params = list(
-
-        # regression with squared error loss
-        objective = "reg:squarederror",
-
-        # tree parameters
-        max_depth = max_depth,
-
-        # learning rate
-        eta = eta,
-
-        # sampling
-        subsample = subsample,
-
-        # column sampling
-        colsample_bytree = colsample_bytree
+          # avoid oversubscribing CPU when the main simulation is parallel
+          nthread = 1
+        ),
+        params_tuned
       ),
-
-      # silent
       verbose = 0
     )
 
+    # predicted values
+    yhat <- predict(fit, dtrain)
+
     # return residuals
-    y - predict(fit, dtrain)
+    y - yhat
   }
 
   # residualise x's
@@ -985,8 +987,7 @@ safe_fit_clpm_C <- function(model_string, data) {
   list(fit = fit, err = err)
 }
 
-# same as above but for CLPM with residualised confounders
-safe_fit_clpm_resid <- function(model_string, data) {
+safe_fit_clpm_resid <- function(model_string, data, k) {
 
   # initialize error message
   err <- NA_character_
@@ -995,7 +996,7 @@ safe_fit_clpm_resid <- function(model_string, data) {
   df_resid <- tryCatch(
 
     # residualise the data using the helper function
-    residualise_panel_linearC(data),
+    residualise_panel_linearC(data, k),
 
     # capture error message if residualisation fails
     error = function(e) {
@@ -1039,8 +1040,8 @@ safe_fit_clpm_resid <- function(model_string, data) {
   list(fit = fit, err = err)
 }
 
-# same as above but for CLPM with XGBoost-residualised confounders
-safe_fit_clpm_xgb <- function(model_string, data) {
+# same as above but for CLPM with XGB residualisation
+safe_fit_clpm_xgb <- function(model_string, data, k) {
 
   # initialize error message
   err <- NA_character_
@@ -1049,7 +1050,7 @@ safe_fit_clpm_xgb <- function(model_string, data) {
   df_resid <- tryCatch(
 
     # residualise the data using the XGBoost helper function
-    residualise_panel_xgb(data),
+    residualise_panel_xgb(data, k),
 
     # capture error message if residualisation fails
     error = function(e) {
@@ -1091,6 +1092,124 @@ safe_fit_clpm_xgb <- function(model_string, data) {
 
   # return fit and error
   list(fit = fit, err = err)
+}
+
+############################################################
+##  6.2 XGB: One-time CV tuner (run once per study)
+############################################################
+
+# in a true application of XBG residualisation, one would want to tune the hyperparameters
+# however, this is computationally very costly. 
+# therefore, we provide a function that can be run once per study design to find the optimal hyperparameters
+# and recycle these for all simulations in that design, recreating how tuning would happen in practice
+
+tune_xgb_once <- function(df,
+                          k,
+                          x_prefix = "x",
+                          y_prefix = "y",
+                          c_prefix = "c",
+                          nfold = 5,
+                          nrounds_max = 3000,
+                          early_stopping_rounds = 30) {
+
+  # convert to data frame
+  df <- as.data.frame(df)
+
+  # get column names
+  x_cols <- grep(paste0("^", x_prefix, "\\d+$"), names(df), value = TRUE)
+  y_cols <- grep(paste0("^", y_prefix, "\\d+$"), names(df), value = TRUE)
+
+  # only linear confounders are observed
+  c_cols <- paste0(c_prefix, 1:k)
+
+  # confounder matrix (standardised for XGB stability)
+  C <- scale(as.matrix(df[c_cols]))
+
+  # stack all waves to tune on more rows
+  y_stack <- c(unlist(df[x_cols]), unlist(df[y_cols]))
+  C_stack <- C[rep(seq_len(nrow(C)), times = length(x_cols) + length(y_cols)), , drop = FALSE]
+
+  dtrain <- xgboost::xgb.DMatrix(data = C_stack, label = y_stack)
+
+  # small but useful grid 
+  grid <- expand.grid(
+    max_depth        = c(2:8),
+    min_child_weight = c(1, 2, 5, 10),
+    eta              = c(0.01, 0.02, 0.05, 0.10),
+    subsample        = c(0.6, 0.8, 1.0),
+    colsample_bytree = c(0.6, 0.8, 1.0),
+    gamma            = c(0, 0.5, 1, 2, 5),
+    lambda           = c(1),
+    alpha            = c(0),
+    KEEP.OUT.ATTRS   = FALSE
+  )
+
+  # trim the grid to keep tuning feasible
+  max_grid <- 300
+
+  # sample a subset of configurations (reproducible)
+  if (nrow(grid) > max_grid) {
+    set.seed(1)
+    grid <- grid[sample.int(nrow(grid), max_grid), , drop = FALSE]
+  }
+
+  best_rmse <- Inf
+  best_params <- NULL
+  best_nrounds <- NULL
+
+  # message so it is clear why the simulation progress bar has not started yet
+  cat("\nTuning the XGB model (one-time CV)...\n")
+
+  # create a progress bar for the CV grid
+  # (this one shows elapsed time + estimated time left)
+  pb <- pbapply::timerProgressBar(min = 0, max = nrow(grid), style = 3)
+
+  for (i in seq_len(nrow(grid))) {
+
+    # update progress bar
+    pbapply::setTimerProgressBar(pb, i)
+
+    params <- as.list(grid[i, ])
+
+    cv <- xgboost::xgb.cv(
+      data = dtrain,
+      nrounds = nrounds_max,
+      nfold = nfold,
+      early_stopping_rounds = early_stopping_rounds,
+      verbose = 0,
+      params = c(
+        list(
+          objective = "reg:squarederror",
+          eval_metric = "rmse",
+          booster = "gbtree",
+          tree_method = "hist",
+
+          # let xgboost use multiple threads during tuning
+          nthread = max(1, parallel::detectCores() - 1)
+        ),
+        params
+      )
+    )
+
+    rmse <- cv$evaluation_log$test_rmse_mean[cv$best_iteration]
+
+    if (rmse < best_rmse) {
+      best_rmse <- rmse
+      best_params <- params
+      best_nrounds <- cv$best_iteration
+    }
+  }
+
+  # close the progress bar
+  close(pb)
+
+  # newline so the next progress bar starts on a clean line
+  cat("\n")
+
+  list(
+    params  = best_params,
+    nrounds = best_nrounds
+  )
 }
 
 ############################################################
@@ -1403,8 +1522,10 @@ run_one_rep_study2 <- function(
     res_ric  <- if ("riclpm" %in% models_to_run) safe_fit_riclpm(model_riclpm, df) else list(fit=NULL, err=NA)
     res_dpm0 <- if ("dpm"    %in% models_to_run) safe_fit_dpm(model_dpm, df) else list(fit=NULL, err=NA)
     res_adj  <- if ("adj"    %in% models_to_run) safe_fit_clpm_C(model_clpm_with_Cs, df) else list(fit=NULL, err=NA)
-    res_lbca <- if ("lbca"   %in% models_to_run) safe_fit_clpm_resid(model_clpm, df) else list(fit=NULL, err=NA)
-    res_xgb  <- if ("xgb"    %in% models_to_run) safe_fit_clpm_xgb(model_clpm, df) else list(fit=NULL, err=NA)
+
+    # LBCA + XGB should only use the linear confounders (c1..ck)
+    res_lbca <- if ("lbca"   %in% models_to_run) safe_fit_clpm_resid(model_clpm, df, k) else list(fit=NULL, err=NA)
+    res_xgb  <- if ("xgb"    %in% models_to_run) safe_fit_clpm_xgb(model_clpm, df, k) else list(fit=NULL, err=NA)
 
     fit_clpm_raw <- res_clpm$fit
     fit_ric      <- res_ric$fit
@@ -1525,6 +1646,52 @@ run_simulation_study2 <- function(
     cores <- max(1, floor(parallel::detectCores() / 2))
   }
 
+  # XGB: One-time CV tuning (run once per study)
+  if ("xgb" %in% models_to_run) {
+
+    # choose a pilot scenario for tuning
+    scen_tune <- scenarios[1]
+
+    # set seed for pilot so it is reproducible
+    set.seed(base_seed + 1)
+
+    # sample baseline confounder effects matrix B1
+    B1_pilot <- sample_B_int(
+      k     = k,
+      R2_1  = R2_1,
+      eta_1 = eta_1
+    )
+
+    # choose trajectory generator
+    if (scen_tune == "constant") {
+      B_list_pilot <- generate_B_constant(B1_pilot, T)
+    } else if (scen_tune == "stepwise") {
+      B_list_pilot <- generate_B_stepwise(B1_pilot, T, target_sd = target_sd)
+    } else {
+      stop("Unknown scenario: ", scen_tune)
+    }
+
+    # simulate pilot data
+    df_pilot <- simulate_panel_data_int(
+      N         = N,
+      T         = T,
+      A         = A,
+      B_list    = B_list_pilot,
+      Psi       = Psi,
+      rho_extra = rho_extra
+    )
+
+    # tune and store globally so residualise_panel_xgb can access it
+    XGB_TUNED <- tune_xgb_once(df_pilot, k)
+    assign("XGB_TUNED", XGB_TUNED, envir = .GlobalEnv)
+
+  } else {
+
+    # if we do not run xgb, set the tuning object to NULL
+    XGB_TUNED <- NULL
+    assign("XGB_TUNED", XGB_TUNED, envir = .GlobalEnv)
+  }
+
   # if cores is 1, run sequentially without parallelization
   if (cores == 1L) {
 
@@ -1596,11 +1763,14 @@ run_simulation_study2 <- function(
       "extract_rho_vec",
 
       # wrapper
-      "run_one_rep_study1",
+      "run_one_rep_study2",
 
       # arguments
       "N","T","k","R2_1","eta_1","target_sd","scenarios",
-      "A","Psi","rho_extra","models_to_run","base_seed"
+      "A","Psi","rho_extra","models_to_run","base_seed",
+
+      # tuned xgb settings
+      "XGB_TUNED"
     ),
     envir = environment()
   )
@@ -1610,7 +1780,7 @@ run_simulation_study2 <- function(
     X  = 1:reps,
     cl = cl,
     FUN = function(rep_id) {
-      run_one_rep_study1(
+      run_one_rep_study2(
         rep_id        = rep_id,
         N             = N,
         T             = T,
@@ -1634,4 +1804,3 @@ run_simulation_study2 <- function(
   # return the results
   dplyr::bind_rows(results_list)
 }
-

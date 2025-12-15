@@ -21,19 +21,19 @@ Psi <- diag(3)                     # uncorrelated confounders with var=1
 
 # run the simulation
 results_s1 <- run_simulation_study1(
-  reps          = 100,                         # number of replications
+  reps          = 1000,                        # number of replications
   N             = 1000,                        # sample size
   T             = 5,                           # number of waves
   k             = 3,                           # number of confounders
-  R2_1          = 0.2,                         # confounder R2 at wave 1
-  target_sd     = 0.25,                        # SD of B(t) variation
+  R2_1          = 0.15,                        # confounder R2 at wave 1
+  target_sd     = 0.5,                        # SD of B(t) variation
   scenarios     = c("constant", "stepwise"),   # scenarios to run
   A             = A,                           # 2×2 AR + cross-lag matrix
   Psi           = Psi,                         # confounder covariance
-  rho_extra     = 0.15,                        # extra X–Y covariance
+  rho_extra     = 0.1,                         # extra X–Y covariance
   models_to_run = c("clpm","riclpm",           # 5 modeling approaches 
                     "dpm","lbca","adj"),
-  cores         = 7,                           # number of cores to use
+  cores         = 6,                           # number of cores to use
   base_seed     = 12345                        # reproducible base seed
 )
 
@@ -675,20 +675,21 @@ Psi <- diag(3)                     # uncorrelated confounders with var=1
 
 # run the simulation
 results_s2 <- run_simulation_study2(
-  reps          = 100,                         # number of replications
+  reps          = 1000,                        # number of replications
   N             = 1000,                        # sample size
   T             = 5,                           # number of waves
   k             = 3,                           # number of confounders
-  R2_1          = 0.2,                         # confounder R2 at wave 1
-  eta_1         = 0.50,                        # share of R2 due to non-linear confounding
-  target_sd     = 0.25,                        # SD of B(t) variation
+  R2_1          = 0.15,                        # confounder R2 at wave 1
+  eta_1         = 0.5,                         # share of R2 due to non-linear confounding
+  target_sd     = 0.5,                         # SD of B(t) variation
   scenarios     = c("constant", "stepwise"),   # scenarios to run
   A             = A,                           # 2×2 AR + cross-lag matrix
   Psi           = Psi,                         # confounder covariance
-  rho_extra     = 0.15,                        # extra X–Y covariance
+  rho_extra     = 0.1,                         # extra X–Y covariance
   models_to_run = c("clpm","riclpm",           # 5 modeling approaches 
-                    "dpm","lbca","adj"),
-  cores         = 7,                           # number of cores to use
+                    "dpm","lbca","adj",
+                    "xgb"),
+  cores         = 6,                           # number of cores to use
   base_seed     = 12345                        # reproducible base seed
 )
 
@@ -696,10 +697,173 @@ results_s2 <- run_simulation_study2(
 
 And now visualise the results for simulation study 2.
 
-
 ```{r}
 
 df <- results_s2
+str(df)
+
+# custom colour palette
+blue_magenta <- c(
+  "#3B4CC0", "#5E60CE", "#7A70D1", "#9775D3", "#B67BD2",
+  "#D084CF", "#E28FC4", "#F29BC1", "#FF9ACD"
+)
+
+# dxtend colours to number of runs
+n_runs <- length(unique(df$run))
+blue_magenta_extended <- rep(blue_magenta, length.out = n_runs)
+
+###############################################################################
+# plot 1: visualize how beta_X and beta_Y change over occasions
+###############################################################################
+
+# the effect of the confounder on X and Y over occasions, by scenario
+plot_beta_X_s2 <- df %>%
+
+  # the occasion on the X-axis, beta_X on the Y-axis, grouped and coloured by run
+  # note that beta_X is the average over the 3 confounders
+  ggplot(aes(x = occasion, y = beta_X,
+             group = run, color = factor(run))) +
+
+  # determines the look of the line
+  geom_line(linewidth = 0.7, alpha = 0.9) +
+  
+  # separate plots for each scenario
+  facet_wrap(~ scenario) +
+  
+  # use the custom colour palette
+  scale_color_manual(values = blue_magenta_extended) +
+
+  # remove the legend
+  guides(color = "none") +
+
+  # labels for the axes
+  labs(x = "Occasion", y = "Effect of Confounder C on X") +
+
+  # minimal theme for the plot
+  theme_minimal()
+
+# precisely the same for beta_Y
+plot_beta_Y_s2 <- df %>%
+  ggplot(aes(x = occasion, y = beta_Y,
+             group = run, color = factor(run))) +
+  geom_line(linewidth = 0.7, alpha = 0.9) +
+  facet_wrap(~ scenario) +
+  scale_color_manual(values = blue_magenta_extended) +
+  guides(color = "none") +
+  labs(x = "Occasion", y = "Effect of Confounder on Y") +
+  theme_minimal()
+
+###############################################################################
+# plot 2: visualise how the explained variance changes over occasions
+###############################################################################
+
+# set equal to simulation parameter
+eta_1 <- 0.50
+
+plot_R2_X_s2 <- df %>%
+  
+  # compute total R2 at each occasion from time-varying beta
+  mutate(
+    R2_X_tot = beta_X^2,
+    
+    # split total R2 into linear and non-linear parts using eta_1
+    R2_X_lin = (1 - eta_1) * R2_X_tot,
+    R2_X_non = eta_1 * R2_X_tot
+  ) %>%
+  
+  # reshape to long format for stacked plotting
+  pivot_longer(
+    cols = c(R2_X_lin, R2_X_non),
+    names_to = "component",
+    values_to = "R2_X"
+  ) %>%
+  
+  # the occasion on the X-axis, R2_X on the Y-axis, grouped by run
+  ggplot(aes(
+    x = occasion,
+    y = R2_X,
+    group = interaction(run, component),
+    fill  = component
+  )) +
+
+  # stacked area shows total magnitude and decomposition
+  geom_area(alpha = 0.8, color = NA) +
+
+  # separate plots for each scenario
+  facet_wrap(~ scenario) +
+
+  # use the custom colour palette
+  scale_fill_manual(
+    values = c(
+      R2_X_lin = blue_magenta_extended[1],
+      R2_X_non = blue_magenta_extended[3]
+    ),
+    labels = c(
+      R2_X_lin = "Linear component",
+      R2_X_non = "Non-linear component"
+    )
+  ) +
+
+  # labels for the axes
+  labs(
+    x = "Occasion",
+    y = "Explained Variance of Confounder C on X",
+    fill = ""
+  ) +
+
+  # minimal theme for the plot
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
+
+
+# same for R2_Y
+plot_R2_Y_s2 <- df %>%
+  
+  # compute total R2 at each occasion from time-varying beta
+  mutate(
+    R2_Y_tot = beta_Y^2,
+    
+    # split total R2 into linear and non-linear parts using eta_1
+    R2_Y_lin = (1 - eta_1) * R2_Y_tot,
+    R2_Y_non = eta_1 * R2_Y_tot
+  ) %>%
+  
+  # reshape to long format for stacked plotting
+  pivot_longer(
+    cols = c(R2_Y_lin, R2_Y_non),
+    names_to = "component",
+    values_to = "R2_Y"
+  ) %>%
+  
+  ggplot(aes(
+    x = occasion,
+    y = R2_Y,
+    group = interaction(run, component),
+    fill  = component
+  )) +
+  geom_area(alpha = 0.8, color = NA) +
+  facet_wrap(~ scenario) +
+  scale_fill_manual(
+    values = c(
+      R2_Y_lin = blue_magenta_extended[1],
+      R2_Y_non = blue_magenta_extended[3]
+    ),
+    labels = c(
+      R2_Y_lin = "Linear component",
+      R2_Y_non = "Non-linear component"
+    )
+  ) +
+  labs(
+    x = "Occasion",
+    y = "Explained Variance of Confounder C on Y",
+    fill = ""
+  ) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom"
+  )
 
 ###############################################################################
 # plot 3: show the mean absolute bias of the different models 
@@ -712,8 +876,10 @@ true_ax <- A[1,1]   # X (AR)
 true_ay <- A[2,2]   # Y (AR)
 
 # cross-lagged estimates mean absolute bias X on Y 
-bias_XY <- df %>%
-  select(run, occasion, scenario, starts_with("estXY_")) %>%
+bias_XY_s2 <- df %>%
+  select(run, occasion, scenario,
+         estXY_CLPM, estXY_RI_CLPM, estXY_DPM,
+         estXY_CLPM_Adj, estXY_CLPM_LBCA, estXY_CLPM_XGB) %>%
   
   # long format
   pivot_longer(
@@ -730,21 +896,49 @@ bias_XY <- df %>%
   summarise(mean_abs_bias = mean(abs_bias, na.rm = TRUE),
             .groups = "drop")
 
+# plot mean abs bias for XY
+plot_bias_XY_s2 <- bias_XY_s2 %>%
+  ggplot(aes(x = occasion, y = mean_abs_bias, color = model)) +
+  geom_line(linewidth = 0.9) +
+  facet_grid(rows = vars(scenario), cols = vars(model), scales = "free_y") +
+  labs(x = "Occasion",
+       y = "Mean Absolute Bias",
+       title = "Bias: Cross-Lag XY") +
+  theme_minimal() +
+  theme(strip.text = element_text(size = 10),
+        legend.position = "none")
+
 # same but for YX
-bias_YX <- df %>%
-  select(run, occasion, scenario, starts_with("estYX_")) %>%
+bias_YX_s2 <- df %>%
+  select(run, occasion, scenario,
+         estYX_CLPM, estYX_RI_CLPM, estYX_DPM,
+         estYX_CLPM_Adj, estYX_CLPM_LBCA, estYX_CLPM_XGB) %>%
+  
   pivot_longer(
     cols      = starts_with("estYX_"),
     names_to  = "model",
     values_to = "estimate"
   ) %>%
+  
   mutate(abs_bias = abs(estimate - true_yx)) %>%
+  
   group_by(scenario, model, occasion) %>%
   summarise(mean_abs_bias = mean(abs_bias, na.rm = TRUE),
             .groups = "drop")
 
+plot_bias_YX_s2 <- bias_YX_s2 %>%
+  ggplot(aes(x = occasion, y = mean_abs_bias, color = model)) +
+  geom_line(linewidth = 0.9) +
+  facet_grid(rows = vars(scenario), cols = vars(model), scales = "free_y") +
+  labs(x = "Occasion",
+       y = "Mean Absolute Bias",
+       title = "Bias: Cross-Lag YX") +
+  theme_minimal() +
+  theme(strip.text = element_text(size = 10),
+        legend.position = "none")
+
 # compute mean absolute bias for AR(X)
-bias_AX <- df %>%
+bias_AX_s2 <- df %>%
   select(run, occasion, scenario,
          estA_CLPM, estA_RI_CLPM, estA_DPM,
          estA_CLPM_Adj, estA_CLPM_LBCA, estA_CLPM_XGB) %>%
@@ -761,8 +955,25 @@ bias_AX <- df %>%
   summarise(mean_abs_bias = mean(abs_bias, na.rm = TRUE),
             .groups = "drop")
 
+plot_bias_AX_s2 <- bias_AX_s2 %>%
+  ggplot(aes(x = occasion, y = mean_abs_bias, color = model)) +
+  geom_line(linewidth = 0.9) +
+  facet_grid(rows = vars(scenario),
+             cols = vars(model),
+             scales = "free_y") +
+  labs(
+    x = "Occasion",
+    y = "Mean Absolute Bias",
+    title = "Bias of AX Estimates"
+  ) +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(size = 10),
+    legend.position = "none"
+  )
+
 # compute mean absolute bias for AR(Y)
-bias_AY <- df %>%
+bias_AY_s2 <- df %>%
   select(run, occasion, scenario,
          estAY_CLPM, estAY_RI_CLPM, estAY_DPM,
          estAY_CLPM_Adj, estAY_CLPM_LBCA, estAY_CLPM_XGB) %>%
@@ -779,12 +990,104 @@ bias_AY <- df %>%
   summarise(mean_abs_bias = mean(abs_bias, na.rm = TRUE),
             .groups = "drop")
 
+plot_bias_AY_s2 <- bias_AY_s2 %>%
+  ggplot(aes(x = occasion, y = mean_abs_bias, color = model)) +
+  geom_line(linewidth = 0.9) +
+  facet_grid(rows = vars(scenario),
+             cols = vars(model),
+             scales = "free_y") +
+  labs(
+    x = "Occasion",
+    y = "Mean Absolute Bias",
+    title = "Bias of AY Estimates"
+  ) +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(size = 10),
+    legend.position = "none"
+  )
+
 ###############################################################################
 # plot 4: the empirical standard error of the estimates over time
 ###############################################################################
 
-# empirical SE for AR(X)
-se_AR_X <- df %>%
+# reshape and compute empirical standard error for cross-lag XY
+se_crosslag_XY_s2 <- df %>%
+  
+  # select cross-lag XY estimates
+  select(run, occasion, scenario,
+         estXY_CLPM, estXY_RI_CLPM, estXY_DPM,
+         estXY_CLPM_Adj, estXY_CLPM_LBCA, estXY_CLPM_XGB) %>%
+  
+  # pivot to long format
+  pivot_longer(
+    cols = starts_with("estXY_"),
+    names_to = "model",
+    values_to = "estimate"
+  ) %>%
+  
+  # compute empirical SE: sd of estimates over runs
+  group_by(scenario, model, occasion) %>%
+  summarise(
+    emp_se = sd(estimate, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# plot empirical SE (scenarios = rows, methods = columns)
+plot_se_crosslag_XY_s2 <- se_crosslag_XY_s2 %>%
+  ggplot(aes(x = occasion, y = emp_se, color = model)) +
+  geom_line(linewidth = 0.9) +
+  facet_grid(rows = vars(scenario), cols = vars(model), scales = "free_y") +
+  labs(
+    x = "Occasion",
+    y = "Empirical SE",
+    title = "Empirical Standard Error: Cross-lag XY"
+  ) +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(size = 10),
+    legend.position = "none"
+  )
+
+# reshape and compute empirical standard error for cross-lag YX
+se_crosslag_YX_s2 <- df %>%
+  
+  # select cross-lag YX estimates
+  select(run, occasion, scenario,
+         estYX_CLPM, estYX_RI_CLPM, estYX_DPM,
+         estYX_CLPM_Adj, estYX_CLPM_LBCA, estYX_CLPM_XGB) %>%
+  
+  pivot_longer(
+    cols = starts_with("estYX_"),
+    names_to = "model",
+    values_to = "estimate"
+  ) %>%
+  
+  group_by(scenario, model, occasion) %>%
+  summarise(
+    emp_se = sd(estimate, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+plot_se_crosslag_YX_s2 <- se_crosslag_YX_s2 %>%
+  ggplot(aes(x = occasion, y = emp_se, color = model)) +
+  geom_line(linewidth = 0.9) +
+  facet_grid(rows = vars(scenario), cols = vars(model), scales = "free_y") +
+  labs(
+    x = "Occasion",
+    y = "Empirical SE",
+    title = "Empirical Standard Error: Cross-lag YX"
+  ) +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(size = 10),
+    legend.position = "none"
+  )
+
+# reshape and compute empirical standard error for AR(X)
+se_AR_X_s2 <- df %>%
+  
+  # select AR(X) estimates
   select(run, occasion, scenario,
          estA_CLPM, estA_RI_CLPM, estA_DPM,
          estA_CLPM_Adj, estA_CLPM_LBCA, estA_CLPM_XGB) %>%
@@ -801,8 +1104,25 @@ se_AR_X <- df %>%
     .groups = "drop"
   )
 
-# empirical SE for AR(Y)
-se_AR_Y <- df %>%
+plot_se_AR_X_s2 <- se_AR_X_s2 %>%
+  ggplot(aes(x = occasion, y = emp_se, color = model)) +
+  geom_line(linewidth = 0.9) +
+  facet_grid(rows = vars(scenario), cols = vars(model), scales = "free_y") +
+  labs(
+    x = "Occasion",
+    y = "Empirical SE",
+    title = "Empirical Standard Error: AX"
+  ) +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(size = 10),
+    legend.position = "none"
+  )
+
+# reshape and compute empirical standard error for AR(Y)
+se_AR_Y_s2 <- df %>%
+  
+  # select AR(Y) estimates
   select(run, occasion, scenario,
          estAY_CLPM, estAY_RI_CLPM, estAY_DPM,
          estAY_CLPM_Adj, estAY_CLPM_LBCA, estAY_CLPM_XGB) %>%
@@ -819,9 +1139,469 @@ se_AR_Y <- df %>%
     .groups = "drop"
   )
 
-# plots
-plot_bias_XY
-plot_bias_YX
-plot_
+plot_se_AR_Y_s2 <- se_AR_Y_s2 %>%
+  ggplot(aes(x = occasion, y = emp_se, color = model)) +
+  geom_line(linewidth = 0.9) +
+  facet_grid(rows = vars(scenario), cols = vars(model), scales = "free_y") +
+  labs(
+    x = "Occasion",
+    y = "Empirical SE",
+    title = "Empirical Standard Error: AY"
+  ) +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(size = 10),
+    legend.position = "none"
+  )
+
+# plot 5: summary plot 
+# true cross-lag effect X on Y
+true_xy <- A[2, 1]
+
+# compute per-run average estimate and mean absolute bias
+box_crosslag_X_s2 <- df %>%
+  
+  # pull cross-lag X estimates
+  select(run, occasion, scenario,
+         estXY_CLPM, estXY_RI_CLPM, estXY_DPM,
+         estXY_CLPM_Adj, estXY_CLPM_LBCA, estXY_CLPM_XGB) %>%
+  
+  # reshape to long format
+  pivot_longer(
+    cols = starts_with("estXY_"),
+    names_to = "model",
+    values_to = "estimate"
+  ) %>%
+  
+  # per-run averages (per model x scenario)
+  group_by(run, scenario, model) %>%
+  summarise(
+    mean_est = mean(estimate, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  
+  # absolute bias relative to true parameter
+  mutate(abs_bias = abs(mean_est - true_xy))
+
+# boxplots: mean absolute bias across runs
+plot_box_crosslag_X_s2 <- box_crosslag_X_s2 %>%
+  ggplot(aes(x = model, y = abs_bias, fill = model)) +
+  geom_boxplot(alpha = 0.7, outlier.alpha = 0.3) +
+  
+  facet_grid(rows = vars(scenario), cols = vars(model), scales = "free_y") +
+  
+  labs(
+    x = "",
+    y = "Mean absolute bias",
+    title = "Cross-lag XY: mean absolute bias"
+  ) +
+  
+  theme_minimal() +
+  theme(
+    strip.text = element_text(size = 10),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    legend.position = "none"
+  )
+
+# true cross-lag effect Y on X
+true_yx <- A[1, 2]
+
+# compute per-run average estimate and mean absolute bias
+box_crosslag_Y_s2 <- df %>%
+  
+  # pull cross-lag Y estimates
+  select(run, occasion, scenario,
+         estYX_CLPM, estYX_RI_CLPM, estYX_DPM,
+         estYX_CLPM_Adj, estYX_CLPM_LBCA, estYX_CLPM_XGB) %>%
+  
+  pivot_longer(
+    cols = starts_with("estYX_"),
+    names_to = "model",
+    values_to = "estimate"
+  ) %>%
+  
+  group_by(run, scenario, model) %>%
+  summarise(
+    mean_est = mean(estimate, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  
+  mutate(abs_bias = abs(mean_est - true_yx))
+
+# boxplots
+plot_box_crosslag_Y_s2 <- box_crosslag_Y_s2 %>%
+  ggplot(aes(x = model, y = abs_bias, fill = model)) +
+  geom_boxplot(alpha = 0.7, outlier.alpha = 0.3) +
+  
+  facet_grid(rows = vars(scenario), cols = vars(model), scales = "free_y") +
+  
+  labs(
+    x = "",
+    y = "Mean absolute bias",
+    title = "Cross-lag YX: mean absolute bias"
+  ) +
+  
+  theme_minimal() +
+  theme(
+    strip.text = element_text(size = 10),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    legend.position = "none"
+  )
+
+# true AR effect for X
+true_ar_x <- A[1, 1]
+
+box_ar_X_s2 <- df %>%
+  
+  # pull AR(X) estimates
+  select(run, occasion, scenario,
+         estA_CLPM, estA_RI_CLPM, estA_DPM,
+         estA_CLPM_Adj, estA_CLPM_LBCA, estA_CLPM_XGB) %>%
+  
+  pivot_longer(
+    cols = starts_with("estA_"),
+    names_to = "model",
+    values_to = "estimate"
+  ) %>%
+  
+  group_by(run, scenario, model) %>%
+  summarise(
+    mean_est = mean(estimate, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  
+  mutate(abs_bias = abs(mean_est - true_ar_x))
+
+plot_box_ar_X_s2 <- box_ar_X_s2 %>%
+  ggplot(aes(x = model, y = abs_bias, fill = model)) +
+  geom_boxplot(alpha = 0.7, outlier.alpha = 0.3) +
+  
+  facet_grid(rows = vars(scenario), cols = vars(model), scales = "free_y") +
+  
+  labs(
+    x = "",
+    y = "Mean absolute bias",
+    title = "Autoregressive X: mean absolute bias"
+  ) +
+  
+  theme_minimal() +
+  theme(
+    strip.text = element_text(size = 10),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    legend.position = "none"
+  )
+
+# true AR effect for Y
+true_ar_y <- A[2, 2]
+
+box_ar_Y_s2 <- df %>%
+  
+  # pull AR(Y) estimates
+  select(run, occasion, scenario,
+         estAY_CLPM, estAY_RI_CLPM, estAY_DPM,
+         estAY_CLPM_Adj, estAY_CLPM_LBCA, estAY_CLPM_XGB) %>%
+  
+  pivot_longer(
+    cols = starts_with("estAY_"),
+    names_to = "model",
+    values_to = "estimate"
+  ) %>%
+  
+  group_by(run, scenario, model) %>%
+  summarise(
+    mean_est = mean(estimate, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  
+  mutate(abs_bias = abs(mean_est - true_ar_y))
+
+plot_box_ar_Y_s2 <- box_ar_Y_s2 %>%
+  ggplot(aes(x = model, y = abs_bias, fill = model)) +
+  geom_boxplot(alpha = 0.7, outlier.alpha = 0.3) +
+  
+  facet_grid(rows = vars(scenario), cols = vars(model), scales = "free_y") +
+  
+  labs(
+    x = "",
+    y = "Mean absolute bias",
+    title = "Autoregressive Y: mean absolute bias"
+  ) +
+  
+  theme_minimal() +
+  theme(
+    strip.text = element_text(size = 10),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    legend.position = "none"
+  )
+
+###############################################################################
+# displaying all plots
+###############################################################################
+
+# effect of confounder on X and Y over time
+plot_beta_X_s2
+plot_beta_Y_s2
+
+# variance explained by confounder on X and Y over time
+plot_R2_X_s2
+plot_R2_Y_s2
+
+# mean absolute bias of cross-lagged estimates over time 
+plot_bias_XY_s2
+plot_bias_YX_s2
+
+# mean absolute bias of autoregressive estimates over time
+plot_bias_AX_s2
+plot_bias_AY_s2
+
+# mean empirical SE of cross-lagged estimates over time
+plot_se_crosslag_XY_s2
+plot_se_crosslag_YX_s2
+
+# mean empirical SE of autoregressive estimates over time
+plot_se_AR_X_s2
+plot_se_AR_Y_s2
+
+# summary plot of mean absolute bias of cross-lagged estimates
+plot_box_crosslag_X_s2 # (on Y)
+plot_box_crosslag_Y_s2 # (on X)
+
+# summary plot of mean absolute bias of autoregressive estimates
+plot_box_ar_X_s2
+plot_box_ar_Y_s2
+
+
+```
+
+Extra bit where we finalize the two chosen plots for the research rapport
+
+Simulation Study 1: Boxplots of Mean Absolute Relative Bias for Cross-Lagged Effect Y on X
+
+```{r}
+
+library(ggh4x)
+library(colorspace)
+
+df1 <- results_s1
+
+# --- true cross-lag effect X -> Y ---
+true_xy <- A[2, 1]
+
+# --- build abs. relative bias data (per run x scenario x model) ---
+box_crosslag_X_s1_absrel <- df1 %>%
+  select(run, occasion, scenario,
+         estXY_CLPM, estXY_CLPM_Adj, estXY_CLPM_LBCA,
+         estXY_DPM, estXY_RI_CLPM) %>%
+  pivot_longer(
+    cols = starts_with("estXY_"),
+    names_to = "model",
+    values_to = "estimate"
+  ) %>%
+  group_by(run, scenario, model) %>%
+  summarise(mean_est = mean(estimate, na.rm = TRUE), .groups = "drop") %>%
+  mutate(
+    abs_rel_bias = abs((mean_est - true_xy) / true_xy),
+
+    model = recode(model,
+      estXY_CLPM      = "CLPM unadjusted",
+      estXY_CLPM_Adj  = "CLPM adjusted",
+      estXY_CLPM_LBCA = "CLPM linear BCA",
+      estXY_DPM       = "DPM",
+      estXY_RI_CLPM   = "RI-CLPM"
+    ),
+    model = factor(model, levels = c(
+      "CLPM unadjusted",
+      "CLPM adjusted",
+      "CLPM linear BCA",
+      "DPM",
+      "RI-CLPM"
+    )),
+    scenario = factor(scenario, levels = c("constant", "stepwise"))
+  )
+
+# --- runs per scenario (for facet strips) ---
+runs_by_scenario <- box_crosslag_X_s1_absrel %>%
+  summarise(n_runs = n_distinct(run), .by = scenario)
+
+box_crosslag_X_s1_absrel <- box_crosslag_X_s1_absrel %>%
+  left_join(runs_by_scenario, by = "scenario") %>%
+  mutate(
+    scenario_pretty = recode(as.character(scenario),
+      constant = "Constant",
+      stepwise = "Stepwise"
+    ),
+    scenario_facet = paste0("bold('", scenario_pretty, "')*' (runs = ", n_runs, ")'")
+  )
+
+# fixed y-axis across scenarios
+y_lim <- range(box_crosslag_X_s1_absrel$abs_rel_bias, na.rm = TRUE)
+
+# --- muted, colorblind-friendly palette (stable mapping to model levels) ---
+pal <- colorspace::qualitative_hcl(n = nlevels(box_crosslag_X_s1_absrel$model), palette = "Set 2")
+pal <- setNames(pal, levels(box_crosslag_X_s1_absrel$model))
+
+# --- plot ---
+plot_box_crosslag_X_s1_absrel <- ggplot(
+  box_crosslag_X_s1_absrel,
+  aes(x = model, y = abs_rel_bias, fill = model)
+) +
+  geom_boxplot(width = 0.55, alpha = 0.85, outlier.alpha = 0.3, linewidth = 0.35) +
+  ggh4x::facet_wrap2(
+    ~ scenario_facet,
+    nrow = 1,
+    labeller = label_parsed,
+    axes = "y"   # repeat y-axis on each facet (axis between Constant and Stepwise)
+  ) +
+  coord_cartesian(ylim = y_lim) +
+  scale_x_discrete(expand = expansion(mult = c(0.14, 0.03))) +
+  scale_fill_manual(values = pal) +
+  labs(
+    x = "",
+    y = "Mean absolute relative error"
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text = element_text(size = 14),
+    axis.text.x = element_text(
+      size = 13, angle = 90, vjust = 0.5, hjust = 1,
+      margin = margin(t = 8)
+    ),
+    axis.title.y = element_text(size = 13),
+    axis.ticks.x = element_blank(),
+    legend.position = "none",
+    plot.margin = margin(t = 8, r = 8, b = 12, l = 10)
+  )
+
+plot_box_crosslag_X_s1_absrel
+
+```
+
+Simulation Study 2: Boxplots of Mean Absolute Relative Bias for Cross-Lagged Effect X on Y
+```{r}
+
+library(ggh4x)
+library(colorspace)
+
+df2 <- results_s2
+
+# --- true cross-lag effect X -> Y ---
+true_xy <- A[2, 1]
+
+# --- build abs. relative bias data (per run x scenario x model) ---
+box_crosslag_X_s2_absrel <- df2 %>%
+  select(run, occasion, scenario,
+         estXY_CLPM, estXY_CLPM_Adj, estXY_CLPM_LBCA, estXY_CLPM_XGB,
+         estXY_DPM, estXY_RI_CLPM) %>%
+  pivot_longer(
+    cols = starts_with("estXY_"),
+    names_to = "model",
+    values_to = "estimate"
+  ) %>%
+  group_by(run, scenario, model) %>%
+  summarise(mean_est = mean(estimate, na.rm = TRUE), .groups = "drop") %>%
+  mutate(
+    abs_rel_bias = abs((mean_est - true_xy) / true_xy),
+
+    model = recode(model,
+      estXY_CLPM      = "CLPM unadjusted",
+      estXY_CLPM_Adj  = "CLPM adjusted",
+      estXY_CLPM_LBCA = "CLPM linear BCA",
+      estXY_CLPM_XGB  = "CLPM XGB BCA",
+      estXY_DPM       = "DPM",
+      estXY_RI_CLPM   = "RI-CLPM"
+    ),
+    model = factor(model, levels = c(
+      "CLPM unadjusted",
+      "CLPM adjusted",
+      "CLPM linear BCA",
+      "CLPM XGB BCA",
+      "DPM",
+      "RI-CLPM"
+    )),
+    scenario = factor(scenario, levels = c("constant", "stepwise"))
+  )
+
+# --- runs per scenario (for facet strips) ---
+runs_by_scenario <- box_crosslag_X_s2_absrel %>%
+  summarise(n_runs = n_distinct(run), .by = scenario)
+
+box_crosslag_X_s2_absrel <- box_crosslag_X_s2_absrel %>%
+  left_join(runs_by_scenario, by = "scenario") %>%
+  mutate(
+    scenario_pretty = recode(as.character(scenario),
+      constant = "Constant",
+      stepwise = "Stepwise"
+    ),
+    scenario_facet = paste0("bold('", scenario_pretty, "')*' (runs = ", n_runs, ")'")
+  )
+
+# fixed y-axis across scenarios
+y_lim <- range(box_crosslag_X_s2_absrel$abs_rel_bias, na.rm = TRUE)
+
+# --- muted, colorblind-friendly palette (stable mapping to model levels) ---
+pal <- colorspace::qualitative_hcl(n = nlevels(box_crosslag_X_s2_absrel$model), palette = "Set 2")
+pal <- setNames(pal, levels(box_crosslag_X_s2_absrel$model))
+
+# --- plot ---
+plot_box_crosslag_X_s2_absrel <- ggplot(
+  box_crosslag_X_s2_absrel,
+  aes(x = model, y = abs_rel_bias, fill = model)
+) +
+  geom_boxplot(width = 0.55, alpha = 0.85, outlier.alpha = 0.3, linewidth = 0.35) +
+  ggh4x::facet_wrap2(
+    ~ scenario_facet,
+    nrow = 1,
+    labeller = label_parsed,
+    axes = "y"   # repeat y-axis on each facet (axis between Constant and Stepwise)
+  ) +
+  coord_cartesian(ylim = y_lim) +
+  scale_x_discrete(expand = expansion(mult = c(0.14, 0.03))) +
+  scale_fill_manual(values = pal) +
+  labs(
+    x = "",
+    y = "Mean absolute relative error"
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text = element_text(size = 14),
+    axis.text.x = element_text(
+      size = 13, angle = 90, vjust = 0.5, hjust = 1,
+      margin = margin(t = 8)
+    ),
+    axis.title.y = element_text(size = 13),
+    axis.ticks.x = element_blank(),
+    legend.position = "none",
+    plot.margin = margin(t = 8, r = 8, b = 12, l = 10)
+  )
+
+plot_box_crosslag_X_s2_absrel
+
+```
+
+saving our pictures: 
+
+```{r}
+
+ggsave(
+  "C:/Users/Admin/Desktop/plot_crosslag_X_s1_absrel_HQ.png",
+  plot = plot_box_crosslag_X_s1_absrel,
+  width = 215, height = 150, units = "mm",
+  dpi = 600,
+  bg = "white"
+)
+
+ggsave(
+  "C:/Users/Admin/Desktop/plot_crosslag_X_s2_absrel_HQ.png",
+  plot = plot_box_crosslag_X_s2_absrel,
+  width = 215, height = 150, units = "mm",
+  dpi = 600,
+  bg = "white"
+)
 
 ```

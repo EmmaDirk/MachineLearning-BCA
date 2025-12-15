@@ -134,8 +134,8 @@ generate_B_stepwise <- function(
   # fill the list with copies of B1 plus the scaled vector
   for (t in 1:T) {
 
-    # add the scaled value to each element of B1
-    B_list[[t]] <- B1 + v_scaled[t]
+    # add the scaled value to each element of B1, mulplicative so it matches study 2
+    B_list[[t]] <- B1 * (1 + v_scaled[t])
   }
 
   return(B_list)
