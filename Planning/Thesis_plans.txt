@@ -1,0 +1,15 @@
+1. Research and implement more machine learning models. From a theory perspective too. Think about model training too. In a doubly robust scenario,
+we could train a model for X and Y. We could opt for different models for each. Does that increase our chances of a correct model?
+2. Come up with more scenarios for time-varying effects. Why do those effects make sense? 
+Can we come up with some sort of metric that summarises the ammount of variation over time?
+3. Deal with orthogonalisation. Is having a metric of non-linearity worth the hassle of correct variance calculations? Can we have both, 
+and how difficult would that be? 
+4. Review the way we generate non-linearity. What kinds of non-linearity can we add? How do non-linear and interaction effects influence
+our results? How does adding varying and interacting non-linear components influence the results?
+5. Consider the sampling approach. Does it make sense to go over infinite scenarios? What scenarios are more likely in real life?
+Is it a problem that we hand-pick scenarios? 
+6. Vary sample sizes. 
+7. Deal with the issue of lacking standard errors and confidence intervals. 
+8. Make this a package with proper explanation. 
+8. Do an example application on real data.
+
