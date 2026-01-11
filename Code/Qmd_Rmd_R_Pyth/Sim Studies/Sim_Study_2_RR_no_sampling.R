@@ -4,11 +4,11 @@
 # 
 # The goal of this script is to provide evidence that the RI-CLPM, just like the DPM, are not equipped
 # to handle time-varying effects of baseline confounders. In this script we do the following:
-# 1) Pick a matrix of B coefficients for k confounders. If k = 3, this means we have 3 confounders c1, c2, c3 each with an effect on X and Y.
-#         we here need to sample the beta's such that their squared sum matches a target R^2 at time 1.
-# 2) Now we need to vary the effects of these confounders over time using a stepwise function. We also hold a constant scenario for comparison.
+# 1) (CHANGED) Remove sampling of B coefficients. Instead, allow the user to pass in B-matrices directly.
+# 2) (CHANGED) Remove internal B trajectory generators (constant/stepwise). Instead, use user-supplied B lists per scenario.
 # 3) We simulate panel data under a CLPM data-generating process with time-varying B matrices.
 # 4) Build the models dynamically for adaption to T: CLPM, RI-CLPM, DPM, CLPM with confounders, and linear BCA in conjunction with CLPM. 
+# 5) (CHANGED) For all extracted lagged parameters (AR and cross-lags), we now also return p-values and confidence intervals.
 
 library(mvtnorm)
 library(lavaan)
@@ -18,195 +18,58 @@ library(pbapply)
 library(xgboost)
 
 ############################################################
-##  1. Sample baseline B-matrix (linear + non-linear confounders)
+##  1. User-supplied B-matrices helpers (replaces sampling)
 ############################################################
 
-# this function computes the number of possible interaction terms from k confounders
-# then samples coeffiecients for both linear and non-linear terms such that their squared sum matches a target R^2
-# and that the ratio of non-linear to total R^2 matches eta_1
+# helper: compute number of interaction terms (order >= 2) from k confounders
+n_interactions_from_k <- function(k) {
 
-sample_B_int <- function(
-    k,                                                             # number of confounders
-    R2_1,                                                          # total confounder R^2 at t = 1 
-    eta_1 = 0.0,                                                   # R2_nonlin / R2_total at t=1
-    min_abs   = 0.01,                                              # minimum absolute value for each beta
-    max_abs   = 0.60,                                              # maximum absolute value for each beta
-    max_tries = 100000                                             # maximum sampling attempts
-) {
-
-  # if eta_1 is out of bounds, throw an error  
-  if (eta_1 < 0 || eta_1 > 1)
-    stop("eta_1 must be between 0 and 1.")
-
-  # number of linear coefficients
-  k_lin <- k
+  # if k < 2, there are no interactions
+  if (k < 2) return(0L)
 
   # number of non-linear coefficients: all interactions of order >= 2
-  k_non <- sum(sapply(2:k, function(m) choose(k, m)))
-
-  # split R2_1 into linear and non-linear parts
-  R2_lin <- (1 - eta_1) * R2_1
-  R2_non <- eta_1 * R2_1
-
-  # split R2 equally across X and Y 
-  target_X_lin <- R2_lin
-  target_Y_lin <- R2_lin
-
-  target_X_non <- R2_non
-  target_Y_non <- R2_non
-
-  # start the loop: for i in the max number of tries
-  for (i in seq_len(max_tries)) {
-
-    # sample k random numbers from a normal distribution
-    u_x <- rnorm(k_lin)
-
-    # normalize so the sum of squares of this vector is 1
-    u_x <- u_x / sqrt(sum(u_x^2))
-
-    # scale to the target variance 
-    b_x_lin <- if (k_lin > 0 && target_X_lin > 0)
-      sqrt(target_X_lin) * u_x else numeric(0)
-
-    # repeat for Y
-    u_y <- rnorm(k_lin)
-    u_y <- u_y / sqrt(sum(u_y^2))
-    b_y_lin <- if (k_lin > 0 && target_Y_lin > 0)
-      sqrt(target_Y_lin) * u_y else numeric(0)
-
-    # now sample non-linear betas (interaction terms)
-    if (k_non > 0 && target_X_non > 0) {
-
-      # sample all interaction coefficients
-      u_x_nl <- rnorm(k_non)
-
-      # normalize so the sum of squares is 1
-      u_x_nl <- u_x_nl / sqrt(sum(u_x_nl^2))
-
-      # scale to the non-linear target variance
-      b_x_non <- sqrt(target_X_non) * u_x_nl
-
-      # repeat for Y
-      u_y_nl <- rnorm(k_non)
-      u_y_nl <- u_y_nl / sqrt(sum(u_y_nl^2))
-      b_y_non <- sqrt(target_Y_non) * u_y_nl
-
-    } else {
-      b_x_non <- numeric(0)
-      b_y_non <- numeric(0)
-    }
-
-    # save combined beta vectors
-    b_x <- c(b_x_lin, b_x_non)
-    b_y <- c(b_y_lin, b_y_non)
-
-    # check if all absolute values are within the specified bounds
-    if (all(abs(b_x) >= min_abs,
-            abs(b_x) <= max_abs,
-            abs(b_y) >= min_abs,
-            abs(b_y) <= max_abs)) {
-
-      # if so, return the B matrix
-      B1 <- rbind(b_x, b_y)
-
-      # set row and column names
-      rownames(B1) <- c("X", "Y")
-
-      # construct interaction names
-      int_names <- unlist(
-        lapply(2:k, function(m) {
-          combn(1:k, m, FUN = function(ix)
-            paste0("c", paste(ix, collapse = ":")))
-        })
-      )
-
-      colnames(B1) <- c(
-        paste0("c", 1:k_lin),
-        int_names
-      )
-
-      return(B1)
-    }
-  }
-
-  # if the loop doesn't return a valid B matrix, throw an error
-  stop("Failed to sample a valid B matrix within max_tries.")
+  sum(sapply(2:k, function(m) choose(k, m)))
 }
 
-############################################################
-##  2. Generate B trajectory
-############################################################
+# helper: coerce a user-provided B input into a list of length T
+# accepts either:
+#   - a single 2 x p matrix (recycled to all waves), or
+#   - a list of length T, each element a 2 x p matrix
+as_B_list <- function(B_in, T) {
 
-# function to generate B trajectory where B is constant over time
+  # if user provides a single matrix, recycle it across T waves
+  if (is.matrix(B_in)) {
 
-generate_B_constant <- function(
-    B1,                                                           # baseline B-matrix
-    T                                                             # number of time points
-){
+    # basic sanity check
+    if (nrow(B_in) != 2)
+      stop("B matrix must have exactly 2 rows (X, Y).")
 
-  # create an emtpy list of length T
-  B_list <- vector("list", T)
-
-  # set names for each time point
-  names(B_list) <- paste0("t", 1:T)
-
-  # fill the list with copies of B1
-  for (t in 1:T) {
-    B_list[[t]] <- B1
-  }
-  
-  # return the list of B matrices
-  return(B_list)
-}
-
-# function to generate B trajectory with a step function
-# here we need to make sure that the SD of the beta variation over time matches a target SD
-# and also that over time, the ammount of non-linearity remains equal
-generate_B_stepwise <- function(
-    B1,                                                            # baseline B-matrix
-    T,                                                             # number of time pointss
-    target_sd = 0.10                                               # target SD of beta variation over time
-){
-
-  # create a vector where the first half is 0 and the second half is 1
-  v <- c(                                                          # looks like {0,0,1,1,1} for T = 5
-    rep(0, floor(T/2)),                                            # looks like {0,0} for T = 5
-    rep(1, T - floor(T/2))                                         # looks like {1,1,1} for T = 5
-  )
-
-  # subtract the mean of the vector 
-  v_centered <- v - mean(v)                                        # looks like {-0.6, -0.6, -0.6, 0.4, 0.4} for T = 5
-
-  # compute the current SD of this vector
-  current_sd <- sd(v_centered)                                     # for T=5, the current_sd = 0.55 , variance = 0.3       
-
-  # scale the vector to have the target SD
-  # so if the current SD is bigger than 0
-  if (current_sd > 0) {
-
-    # the scaled sd is v_centered * (target_sd / current_sd)
-    v_scaled <- v_centered * (target_sd / current_sd)              # for T=5 and taget_sd = 0.10, looks like: {-0.1095, -0.1095, -0.1095, 0.0730, 0.0730}
-  } else {
-
-    # but if the current SD is 0, we just set the scaled vector to 0s
-    v_scaled <- rep(0, T)
+    B_list <- vector("list", T)
+    names(B_list) <- paste0("t", 1:T)
+    for (t in 1:T) B_list[[t]] <- B_in
+    return(B_list)
   }
 
-  # build list of B matrices of length T
-  B_list <- vector("list", T)
+  # if user provides a list, validate length and contents
+  if (is.list(B_in)) {
 
-  # set names for each time point
-  names(B_list) <- paste0("t", 1:T)
+    if (length(B_in) != T)
+      stop("B list must have length T (one 2 x p matrix per wave).")
 
-  # fill the list with scaled copies of B1
-  for (t in 1:T) {
+    for (t in 1:T) {
+      if (!is.matrix(B_in[[t]]))
+        stop("Each element of B_list must be a 2 x p matrix.")
+      if (nrow(B_in[[t]]) != 2)
+        stop("Each B_t must have exactly 2 rows (X, Y).")
+    }
 
-    # scale all coefficients so that eta_1 stays constant over time
-    # mulplicative scaling rather than additive to keep ratios the same
-    B_list[[t]] <- B1 * (1 + v_scaled[t])
+    # set names if missing
+    if (is.null(names(B_in))) names(B_in) <- paste0("t", 1:T)
+
+    return(B_in)
   }
 
-  return(B_list)
+  stop("B_in must be either a 2 x p matrix or a list of length T of 2 x p matrices.")
 }
 
 ############################################################
@@ -297,39 +160,49 @@ simulate_panel_data_int <- function(
   )
 
   # generate all interaction index sets of order >= 2
-  int_idx <- unlist(
-
-    # for each order m from 2 to k
-    # combine k confounders taken m at a time
-    lapply(2:k, function(m) combn(1:k, m, simplify = FALSE)),
-
-    # flatten the list
-    recursive = FALSE
-  )
+  int_idx <- if (k >= 2) {
+    unlist(
+      # for each order m from 2 to k
+      # combine k confounders taken m at a time
+      lapply(2:k, function(m) combn(1:k, m, simplify = FALSE)),
+      # flatten the list
+      recursive = FALSE
+    )
+  } else {
+    list()
+  }
 
   # build raw interaction terms
-  U_int_raw <- sapply(int_idx, function(ix) {
-
-    # compute product of confounders in this interaction
-    apply(U[, ix, drop = FALSE], 1, prod)
-  })
+  U_int_raw <- if (length(int_idx) > 0) {
+    sapply(int_idx, function(ix) {
+      # compute product of confounders in this interaction
+      apply(U[, ix, drop = FALSE], 1, prod)
+    })
+  } else {
+    matrix(nrow = N, ncol = 0)
+  }
 
   # orthogonalise interaction terms with respect to their linear parents
   # and normalise them to variance 1
-  U_int_orth <- sapply(seq_along(int_idx), function(j) {
+  U_int_orth <- if (length(int_idx) > 0) {
+    sapply(seq_along(int_idx), function(j) {
 
-    # extract the parents for this interaction
-    parents <- U[, int_idx[[j]], drop = FALSE]
+      # extract the parents for this interaction
+      parents <- U[, int_idx[[j]], drop = FALSE]
 
-    # raw interaction term
-    z_raw <- U_int_raw[, j]
+      # raw interaction term
+      z_raw <- U_int_raw[, j]
 
-    # residualise the interaction on its parents
-    z_orth <- resid(lm(z_raw ~ parents))
+      # residualise the interaction on its parents
+      z_orth <- resid(lm(z_raw ~ parents))
 
-    # normalise to variance 1
-    z_orth / sd(z_orth)
-  })
+      # normalise to variance 1
+      sdz <- sd(z_orth)
+      if (is.na(sdz) || sdz == 0) z_orth else z_orth / sdz
+    })
+  } else {
+    matrix(nrow = N, ncol = 0)
+  }
 
   # combine linear and non-linear confounders
   U_full <- cbind(U, U_int_orth)
@@ -795,11 +668,20 @@ residualise_panel_xgb <- function(df,
   if (!exists("XGB_TUNED", inherits = TRUE) || is.null(XGB_TUNED))
     stop("XGB_TUNED not found. Tune once before calling residualise_panel_xgb().")
 
-  nrounds_tuned <- XGB_TUNED$nrounds
-  params_tuned  <- XGB_TUNED$params
+  # (CHANGED) expect separate tuned settings for X and Y
+  if (is.null(XGB_TUNED$params_X) || is.null(XGB_TUNED$nrounds_X) ||
+      is.null(XGB_TUNED$params_Y) || is.null(XGB_TUNED$nrounds_Y)) {
+    stop("XGB_TUNED must contain params_X/nrounds_X and params_Y/nrounds_Y. Re-run tune_xgb_once().")
+  }
+
+  nrounds_X <- XGB_TUNED$nrounds_X
+  params_X  <- XGB_TUNED$params_X
+
+  nrounds_Y <- XGB_TUNED$nrounds_Y
+  params_Y  <- XGB_TUNED$params_Y
 
   # helper: fit xgboost and return residuals
-  xgb_resid <- function(y) {
+  xgb_resid <- function(y, params_tuned, nrounds_tuned) {
 
     # create DMatrix
     dtrain <- xgboost::xgb.DMatrix(data = C, label = y)
@@ -832,11 +714,11 @@ residualise_panel_xgb <- function(df,
 
   # residualise x's
   for (x in x_cols)
-    df[[x]] <- xgb_resid(df[[x]])
+    df[[x]] <- xgb_resid(df[[x]], params_X, nrounds_X)
 
   # residualise y's
   for (y in y_cols)
-    df[[y]] <- xgb_resid(df[[y]])
+    df[[y]] <- xgb_resid(df[[y]], params_Y, nrounds_Y)
 
   # return residualised data frame
   df
@@ -1109,8 +991,10 @@ tune_xgb_once <- function(df,
                           y_prefix = "y",
                           c_prefix = "c",
                           nfold = 5,
-                          nrounds_max = 3000,
-                          early_stopping_rounds = 30) {
+                          nrounds_max = 6000,                 # (CHANGED) allow more rounds for smaller eta
+                          early_stopping_rounds = 100,        # (CHANGED) reduce "too-early stop"
+                          max_grid = 600,                     # (NEW) slightly larger search budget
+                          seed = 1) {                         # (NEW) reproducible grid + folds
 
   # convert to data frame
   df <- as.data.frame(df)
@@ -1125,90 +1009,121 @@ tune_xgb_once <- function(df,
   # confounder matrix (standardised for XGB stability)
   C <- scale(as.matrix(df[c_cols]))
 
-  # stack all waves to tune on more rows
-  y_stack <- c(unlist(df[x_cols]), unlist(df[y_cols]))
-  C_stack <- C[rep(seq_len(nrow(C)), times = length(x_cols) + length(y_cols)), , drop = FALSE]
+  # (NEW) helper: tune on a stacked target with grouped folds by person
+  tune_one <- function(y_stack, C_stack, n_person) {
 
-  dtrain <- xgboost::xgb.DMatrix(data = C_stack, label = y_stack)
+    dtrain <- xgboost::xgb.DMatrix(data = C_stack, label = y_stack)
 
-  # small but useful grid 
-  grid <- expand.grid(
-    max_depth        = c(2:8),
-    min_child_weight = c(1, 2, 5, 10),
-    eta              = c(0.01, 0.02, 0.05, 0.10),
-    subsample        = c(0.6, 0.8, 1.0),
-    colsample_bytree = c(0.6, 0.8, 1.0),
-    gamma            = c(0, 0.5, 1, 2, 5),
-    lambda           = c(1),
-    alpha            = c(0),
-    KEEP.OUT.ATTRS   = FALSE
-  )
+    # (NEW) grouped folds (avoid leakage when the same person's C row is repeated across waves)
+    person_id <- rep(seq_len(n_person), times = nrow(C_stack) / n_person)
 
-  # trim the grid to keep tuning feasible
-  max_grid <- 300
+    set.seed(seed)
+    fold_id_person <- sample(rep(1:nfold, length.out = n_person))
 
-  # sample a subset of configurations (reproducible)
-  if (nrow(grid) > max_grid) {
-    set.seed(1)
-    grid <- grid[sample.int(nrow(grid), max_grid), , drop = FALSE]
+    folds <- lapply(1:nfold, function(f) which(fold_id_person[person_id] == f))
+
+    # (CHANGED) expanded grid (still “small but useful”, just a bit richer)
+    grid <- expand.grid(
+      max_depth        = c(2:10),
+      min_child_weight = c(1, 2, 5, 10, 20),
+      eta              = c(0.003, 0.005, 0.01, 0.02, 0.05, 0.10),
+      subsample        = c(0.5, 0.6, 0.8, 1.0),
+      colsample_bytree = c(0.5, 0.6, 0.8, 1.0),
+      gamma            = c(0, 0.1, 0.5, 1, 2, 5),
+      lambda           = c(0.5, 1, 2, 5),
+      alpha            = c(0, 0.001, 0.01, 0.1),
+      KEEP.OUT.ATTRS   = FALSE
+    )
+
+    # trim the grid to keep tuning feasible
+    if (nrow(grid) > max_grid) {
+      set.seed(seed)
+      grid <- grid[sample.int(nrow(grid), max_grid), , drop = FALSE]
+    }
+
+    best_rmse    <- Inf
+    best_params  <- NULL
+    best_nrounds <- NULL
+
+    # create a progress bar for the CV grid
+    # (this one shows elapsed time + estimated time left)
+    pb <- pbapply::timerProgressBar(min = 0, max = nrow(grid), style = 3)
+
+    for (i in seq_len(nrow(grid))) {
+
+      # update progress bar
+      pbapply::setTimerProgressBar(pb, i)
+
+      params <- as.list(grid[i, ])
+
+      cv <- xgboost::xgb.cv(
+        data = dtrain,
+        nrounds = nrounds_max,
+        folds = folds,                          # (NEW) grouped folds to avoid leakage
+        early_stopping_rounds = early_stopping_rounds,
+        verbose = 0,
+        params = c(
+          list(
+            objective = "reg:squarederror",
+            eval_metric = "rmse",
+            booster = "gbtree",
+            tree_method = "hist",
+
+            # let xgboost use multiple threads during tuning
+            nthread = max(1, parallel::detectCores() - 1)
+          ),
+          params
+        )
+      )
+
+      rmse <- cv$evaluation_log$test_rmse_mean[cv$best_iteration]
+
+      if (rmse < best_rmse) {
+        best_rmse    <- rmse
+        best_params  <- params
+        best_nrounds <- cv$best_iteration
+      }
+    }
+
+    # close the progress bar
+    close(pb)
+
+    list(
+      params  = best_params,
+      nrounds = best_nrounds,
+      rmse    = best_rmse
+    )
   }
-
-  best_rmse <- Inf
-  best_params <- NULL
-  best_nrounds <- NULL
 
   # message so it is clear why the simulation progress bar has not started yet
   cat("\nTuning the XGB model (one-time CV)...\n")
 
-  # create a progress bar for the CV grid
-  # (this one shows elapsed time + estimated time left)
-  pb <- pbapply::timerProgressBar(min = 0, max = nrow(grid), style = 3)
+  # (NEW) tune X and Y separately
+  # stack all X waves to tune on more rows
+  y_stack_x <- unlist(df[x_cols])
+  C_stack_x <- C[rep(seq_len(nrow(C)), times = length(x_cols)), , drop = FALSE]
 
-  for (i in seq_len(nrow(grid))) {
+  cat("\n - Tuning X residualiser...\n")
+  tuned_x <- tune_one(y_stack_x, C_stack_x, n_person = nrow(C))
 
-    # update progress bar
-    pbapply::setTimerProgressBar(pb, i)
+  # stack all Y waves to tune on more rows
+  y_stack_y <- unlist(df[y_cols])
+  C_stack_y <- C[rep(seq_len(nrow(C)), times = length(y_cols)), , drop = FALSE]
 
-    params <- as.list(grid[i, ])
-
-    cv <- xgboost::xgb.cv(
-      data = dtrain,
-      nrounds = nrounds_max,
-      nfold = nfold,
-      early_stopping_rounds = early_stopping_rounds,
-      verbose = 0,
-      params = c(
-        list(
-          objective = "reg:squarederror",
-          eval_metric = "rmse",
-          booster = "gbtree",
-          tree_method = "hist",
-
-          # let xgboost use multiple threads during tuning
-          nthread = max(1, parallel::detectCores() - 1)
-        ),
-        params
-      )
-    )
-
-    rmse <- cv$evaluation_log$test_rmse_mean[cv$best_iteration]
-
-    if (rmse < best_rmse) {
-      best_rmse <- rmse
-      best_params <- params
-      best_nrounds <- cv$best_iteration
-    }
-  }
-
-  # close the progress bar
-  close(pb)
+  cat("\n - Tuning Y residualiser...\n")
+  tuned_y <- tune_one(y_stack_y, C_stack_y, n_person = nrow(C))
 
   # newline so the next progress bar starts on a clean line
   cat("\n")
 
   list(
-    params  = best_params,
-    nrounds = best_nrounds
+    params_X  = tuned_x$params,
+    nrounds_X = tuned_x$nrounds,
+    rmse_X    = tuned_x$rmse,
+
+    params_Y  = tuned_y$params,
+    nrounds_Y = tuned_y$nrounds,
+    rmse_Y    = tuned_y$rmse
   )
 }
 
@@ -1220,35 +1135,48 @@ tune_xgb_once <- function(df,
 # our parameters of interest: autoregressive, cross-lagged, and residual correlation (rho) are located
 
 # lagged parameters extractor
+# (CHANGED) now returns: est, p-value, CI lower, CI upper for each lagged parameter
 extract_lagged_parameters <- function(
     fit,                                                      # lavaan model object
     T,                                                        # number of time points
-    model_type = c("clpm", "riclpm", "dpm")                   # model type
+    model_type = c("clpm", "riclpm", "dpm"),                  # model type
+    ci_level = 0.95                                          # CI level
 ){
 
   # match model type
   model_type <- match.arg(model_type)
 
+  # helper: empty stats data frame
+  empty_stats <- data.frame(
+    est      = rep(NA_real_, T-1),
+    p        = rep(NA_real_, T-1),
+    ci.lower = rep(NA_real_, T-1),
+    ci.upper = rep(NA_real_, T-1)
+  )
+
   # if the model fit failed, return NAs
   if (is.null(fit)) {
     return(list(
-      ar_x = rep(NA, T-1),    # autoregressive X_t ← X_{t-1}
-      ar_y = rep(NA, T-1),    # autoregressive Y_t ← Y_{t-1}
-      xy   = rep(NA, T-1),    # cross-lag Y_t ← X_{t-1}   (X → Y)
-      yx   = rep(NA, T-1)     # cross-lag X_t ← Y_{t-1}   (Y → X)
+      ar_x = empty_stats,    # autoregressive X_t ← X_{t-1}
+      ar_y = empty_stats,    # autoregressive Y_t ← Y_{t-1}
+      xy   = empty_stats,    # cross-lag Y_t ← X_{t-1}   (X → Y)
+      yx   = empty_stats     # cross-lag X_t ← Y_{t-1}   (Y → X)
     ))
   }
 
-  # try to extract parameter table
-  pe <- tryCatch(lavaan::parameterEstimates(fit), error=function(e) NULL)
+  # try to extract parameter table (with CI)
+  pe <- tryCatch(
+    lavaan::parameterEstimates(fit, ci = TRUE, level = ci_level),
+    error = function(e) NULL
+  )
 
   # if extraction failed, return NAs
   if (is.null(pe)) {
     return(list(
-      ar_x = rep(NA, T-1),
-      ar_y = rep(NA, T-1),
-      xy   = rep(NA, T-1),
-      yx   = rep(NA, T-1)
+      ar_x = empty_stats,
+      ar_y = empty_stats,
+      xy   = empty_stats,
+      yx   = empty_stats
     ))
   }
 
@@ -1261,31 +1189,49 @@ extract_lagged_parameters <- function(
     yvar <- "y"
   }
 
-  # helper to grab a single parameter
-  grab <- function(lhs, rhs) {
-    ix <- which(pe$lhs == lhs & pe$rhs == rhs)
-    if (length(ix) == 0) return(NA_real_)
-    pe$est[ix[1]]
+  # helper to grab a single parameter (regression paths only)
+  grab_stats <- function(lhs, rhs) {
+
+    ix <- which(pe$op == "~" & pe$lhs == lhs & pe$rhs == rhs)
+    if (length(ix) == 0) return(c(NA_real_, NA_real_, NA_real_, NA_real_))
+
+    i1 <- ix[1]
+
+    est <- pe$est[i1]
+
+    # p-value column is typically "pvalue"
+    pval <- if ("pvalue" %in% names(pe)) pe$pvalue[i1] else NA_real_
+
+    # CI columns are "ci.lower" and "ci.upper" when ci=TRUE
+    cil <- if ("ci.lower" %in% names(pe)) pe$ci.lower[i1] else NA_real_
+    ciu <- if ("ci.upper" %in% names(pe)) pe$ci.upper[i1] else NA_real_
+
+    c(est, pval, cil, ciu)
   }
 
   # containers
-  ar_x <- numeric(T-1)
-  ar_y <- numeric(T-1)
-  xy   <- numeric(T-1)
-  yx   <- numeric(T-1)
+  ar_x <- empty_stats
+  ar_y <- empty_stats
+  xy   <- empty_stats
+  yx   <- empty_stats
 
   # extract all lagged parameters
   for (t in 2:T) {
 
     # autoregressive
-    ar_x[t-1] <- grab(paste0(xvar, t), paste0(xvar, t-1))
-    ar_y[t-1] <- grab(paste0(yvar, t), paste0(yvar, t-1))
+    sx <- grab_stats(paste0(xvar, t), paste0(xvar, t-1))
+    sy <- grab_stats(paste0(yvar, t), paste0(yvar, t-1))
+
+    ar_x[t-1, ] <- sx
+    ar_y[t-1, ] <- sy
 
     # cross-lag (X → Y)
-    xy[t-1]   <- grab(paste0(yvar, t), paste0(xvar, t-1))
+    sxy <- grab_stats(paste0(yvar, t), paste0(xvar, t-1))
+    xy[t-1, ] <- sxy
 
     # cross-lag (Y → X)
-    yx[t-1]   <- grab(paste0(xvar, t), paste0(yvar, t-1))
+    syx <- grab_stats(paste0(xvar, t), paste0(yvar, t-1))
+    yx[t-1, ] <- syx
   }
 
   list(
@@ -1300,20 +1246,32 @@ extract_lagged_parameters <- function(
 extract_rho_vec <- function(
     fit,                                                           # lavaan model object
     T,                                                             # number of time points
-    model_type = c("clpm","riclpm","dpm")                          # model type
+    model_type = c("clpm","riclpm","dpm"),                         # model type
+    ci_level = 0.95                                                # (NEW) CI level for rho
 ){
 
   # match model type
   model_type <- match.arg(model_type)
 
-  # if the model fit failed, return NAs
-  if (is.null(fit)) return(rep(NA_real_, T))
+  # (NEW) return a stats table for rho: est, p, CI lower/upper
+  empty_rho <- data.frame(
+    est      = rep(NA_real_, T),
+    p        = rep(NA_real_, T),
+    ci.lower = rep(NA_real_, T),
+    ci.upper = rep(NA_real_, T)
+  )
 
-  # try to extract parameter estimates
-  pe <- tryCatch(lavaan::parameterEstimates(fit), error=function(e) NULL)
+  # if the model fit failed, return NAs
+  if (is.null(fit)) return(empty_rho)
+
+  # (NEW) use standardizedSolution so we directly get *correlations* with SE/p/CI
+  ss <- tryCatch(
+    lavaan::standardizedSolution(fit, se = TRUE, ci = TRUE, level = ci_level),
+    error = function(e) NULL
+  )
 
   # if extraction failed, return NAs
-  if (is.null(pe)) return(rep(NA_real_, T))
+  if (is.null(ss)) return(empty_rho)
 
   # determine variable names based on model type, default is x, otherwise is wx
   if (model_type == "riclpm") {
@@ -1325,7 +1283,7 @@ extract_rho_vec <- function(
   }
 
   # prepare container
-  rho <- numeric(T)
+  rho <- empty_rho
 
   # extract rho
   for (t in 1:T) {
@@ -1336,45 +1294,37 @@ extract_rho_vec <- function(
     # the right hand side of the correlation equation
     lhs_yx <- paste0(yvar, t)
 
-    # find the covariance estimate between x_t and y_t
-    ix <- which(pe$lhs == lhs_xy & pe$rhs == lhs_yx)
+    # (NEW) find the standardized covariance entry (this is a correlation in standardizedSolution)
+    ix <- which(ss$op == "~~" & ss$lhs == lhs_xy & ss$rhs == lhs_yx)
 
     # if not found, try the other direction
     if (length(ix) == 0) {
-
-      # find the covariance estimate between y_t and x_t
-      ix <- which(pe$lhs == lhs_yx & pe$rhs == lhs_xy)
+      ix <- which(ss$op == "~~" & ss$lhs == lhs_yx & ss$rhs == lhs_xy)
     }
 
     # if not found, return NA
     if (length(ix) == 0) {
-      rho[t] <- NA_real_
+      rho$est[t]      <- NA_real_
+      rho$p[t]        <- NA_real_
+      rho$ci.lower[t] <- NA_real_
+      rho$ci.upper[t] <- NA_real_
       next
     }
 
-    # covariance estimate
-    cov_xy <- pe$est[ix[1]]
+    i1 <- ix[1]
 
-    # find the variance estimates for x_t and y_t
-    vx_idx <- which(pe$lhs == lhs_xy & pe$rhs == lhs_xy)
-    vy_idx <- which(pe$lhs == lhs_yx & pe$rhs == lhs_yx)
+    # (NEW) standardized estimate column is typically est.std
+    est <- if ("est.std" %in% names(ss)) ss$est.std[i1] else NA_real_
 
-    # if not found, return NA
-    if (length(vx_idx) == 0 || length(vy_idx) == 0) {
-      rho[t] <- NA_real_
-      next
-    }
+    # (NEW) pvalue + CI, when se=TRUE, ci=TRUE
+    pval <- if ("pvalue"   %in% names(ss)) ss$pvalue[i1]   else NA_real_
+    cil  <- if ("ci.lower" %in% names(ss)) ss$ci.lower[i1] else NA_real_
+    ciu  <- if ("ci.upper" %in% names(ss)) ss$ci.upper[i1] else NA_real_
 
-    # variance estimates
-    vx <- pe$est[vx_idx[1]]
-    vy <- pe$est[vy_idx[1]]
-
-    # compute rho: cov_xy / sqrt(vx * vy)
-    if (is.na(vx) || is.na(vy) || vx <= 0 || vy <= 0) {
-      rho[t] <- NA_real_
-    } else {
-      rho[t] <- cov_xy / sqrt(vx * vy)
-    }
+    rho$est[t]      <- est
+    rho$p[t]        <- pval
+    rho$ci.lower[t] <- cil
+    rho$ci.upper[t] <- ciu
   }
 
   # return the residual correlations vector
@@ -1388,47 +1338,65 @@ extract_rho_vec <- function(
 # so now we need to obtain a function that runs all other functions for one replication of the study
 # this function should contain all the arguments that are defined in the previous sections
 
+# (CHANGED) Instead of sampling/generating B, the user passes B_scenarios:
+#   - named list: B_scenarios[["constant"]] = (matrix or list length T)
+#   - or unnamed list aligned with `scenarios` order
 run_one_rep_study2 <- function(
     rep_id,                                                 # replication index (set by outer loop)
     N,                                                      # sample size
     T,                                                      # number of waves
     k,                                                      # number of linear confounder parts
-    R2_1,                                                   # confounder R^2 at wave 1
-    eta_1,                                                  # share of non-linear confounding at wave 1
-    target_sd,                                              # SD of time-variation in B
     scenarios,                                              # character vector: c("constant","stepwise",...)
+    B_scenarios,                                            # (NEW) user-supplied B matrices per scenario
     A,                                                      # 2×2 autoregressive + cross-lag matrix
     Psi,                                                    # k×k confounder covariance
     rho_extra,                                              # extra covariance added to X,Y each wave
     models_to_run,                                          # e.g. c("clpm","riclpm","dpm","lbca","adj","xgb")
-    base_seed = 1234                                        # base seed
+    base_seed = 1234,                                       # base seed
+    ci_level = 0.95                                         # CI level for extracted parameters
 ){
-  
+
   # set seed for this replication, use rep_id so it varies
   set.seed(base_seed + rep_id)
 
-  # sample baseline confounder effects matrix B1
-  B1 <- sample_B_int(
-    k     = k,
-    R2_1  = R2_1,
-    eta_1 = eta_1
-  )
+  # expected number of confounders (linear + interactions)
+  k_non <- n_interactions_from_k(k)
+  p_exp <- k + k_non
 
   # prepare output list for each scenario
   out_list <- vector("list", length(scenarios))
 
   # loop over the scenarios
   for (j in seq_along(scenarios)) {
-    
+
     scen <- scenarios[j]
 
-    # choose trajectory generator
-    if (scen == "constant") {
-      B_list <- generate_B_constant(B1, T)
-    } else if (scen == "stepwise") {
-      B_list <- generate_B_stepwise(B1, T, target_sd = target_sd)
+    # select scenario-specific B input
+    # supports:
+    #   - named list (preferred): B_scenarios[[scen]]
+    #   - unnamed list aligned with scenarios: B_scenarios[[j]]
+    B_in <- NULL
+    if (is.list(B_scenarios) && !is.null(names(B_scenarios)) && scen %in% names(B_scenarios)) {
+      B_in <- B_scenarios[[scen]]
+    } else if (is.list(B_scenarios) && is.null(names(B_scenarios)) && length(B_scenarios) == length(scenarios)) {
+      B_in <- B_scenarios[[j]]
+    } else if (is.list(B_scenarios) && length(B_scenarios) == 1L) {
+      # if only one B provided, recycle across scenarios
+      B_in <- B_scenarios[[1]]
     } else {
-      stop("Unknown scenario: ", scen)
+      stop("Could not map B_scenarios to scenarios. Provide a named list with scenario names, or an unnamed list aligned with `scenarios`.")
+    }
+
+    # coerce to list-of-length-T
+    B_list <- as_B_list(B_in, T)
+
+    # validate dimensions vs k and Psi
+    if (!all(dim(Psi) == c(k, k)))
+      stop("Mismatch: Psi must be k x k with k = ", k, ".")
+    for (t in 1:T) {
+      if (ncol(B_list[[t]]) != p_exp)
+        stop("Mismatch: B_list[[", t, "]] has p = ", ncol(B_list[[t]]),
+             " columns, but expected p = k + #interactions = ", p_exp, ".")
     }
 
     # extract mean betas
@@ -1450,7 +1418,7 @@ run_one_rep_study2 <- function(
     )
 
     if (is.null(df)) {
-      
+
       # simulation failed return NA
       out_list[[j]] <- data.frame(
         run      = rep(rep_id, T),
@@ -1460,36 +1428,46 @@ run_one_rep_study2 <- function(
         beta_X   = beta_X_vec,
         beta_Y   = beta_Y_vec,
 
-        estXY_CLPM      = NA,
-        estXY_RI_CLPM   = NA,
-        estXY_DPM       = NA,
-        estXY_CLPM_Adj  = NA,
-        estXY_CLPM_LBCA = NA,
-        estXY_CLPM_XGB  = NA,
+        # cross-lag XY (est + p + CI)
+        estXY_CLPM      = NA, pXY_CLPM      = NA, ciL_XY_CLPM      = NA, ciU_XY_CLPM      = NA,
+        estXY_RI_CLPM   = NA, pXY_RI_CLPM   = NA, ciL_XY_RI_CLPM   = NA, ciU_XY_RI_CLPM   = NA,
+        estXY_DPM       = NA, pXY_DPM       = NA, ciL_XY_DPM       = NA, ciU_XY_DPM       = NA,
+        estXY_CLPM_Adj  = NA, pXY_CLPM_Adj  = NA, ciL_XY_CLPM_Adj  = NA, ciU_XY_CLPM_Adj  = NA,
+        estXY_CLPM_LBCA = NA, pXY_CLPM_LBCA = NA, ciL_XY_CLPM_LBCA = NA, ciU_XY_CLPM_LBCA = NA,
+        estXY_CLPM_XGB  = NA, pXY_CLPM_XGB  = NA, ciL_XY_CLPM_XGB  = NA, ciU_XY_CLPM_XGB  = NA,
 
-        estYX_CLPM      = NA,
-        estYX_RI_CLPM   = NA,
-        estYX_DPM       = NA,
-        estYX_CLPM_Adj  = NA,
-        estYX_CLPM_LBCA = NA,
-        estYX_CLPM_XGB  = NA,
+        # cross-lag YX (est + p + CI)
+        estYX_CLPM      = NA, pYX_CLPM      = NA, ciL_YX_CLPM      = NA, ciU_YX_CLPM      = NA,
+        estYX_RI_CLPM   = NA, pYX_RI_CLPM   = NA, ciL_YX_RI_CLPM   = NA, ciU_YX_RI_CLPM   = NA,
+        estYX_DPM       = NA, pYX_DPM       = NA, ciL_YX_DPM       = NA, ciU_YX_DPM       = NA,
+        estYX_CLPM_Adj  = NA, pYX_CLPM_Adj  = NA, ciL_YX_CLPM_Adj  = NA, ciU_YX_CLPM_Adj  = NA,
+        estYX_CLPM_LBCA = NA, pYX_CLPM_LBCA = NA, ciL_YX_CLPM_LBCA = NA, ciU_YX_CLPM_LBCA = NA,
+        estYX_CLPM_XGB  = NA, pYX_CLPM_XGB  = NA, ciL_YX_CLPM_XGB  = NA, ciU_YX_CLPM_XGB  = NA,
 
-        estA_CLPM      = NA,
-        estA_RI_CLPM   = NA,
-        estA_DPM       = NA,
-        estA_CLPM_Adj  = NA,
-        estA_CLPM_LBCA = NA,
-        estA_CLPM_XGB  = NA,
+        # AR X (est + p + CI)
+        estA_CLPM      = NA, pA_CLPM      = NA, ciL_A_CLPM      = NA, ciU_A_CLPM      = NA,
+        estA_RI_CLPM   = NA, pA_RI_CLPM   = NA, ciL_A_RI_CLPM   = NA, ciU_A_RI_CLPM   = NA,
+        estA_DPM       = NA, pA_DPM       = NA, ciL_A_DPM       = NA, ciU_A_DPM       = NA,
+        estA_CLPM_Adj  = NA, pA_CLPM_Adj  = NA, ciL_A_CLPM_Adj  = NA, ciU_A_CLPM_Adj  = NA,
+        estA_CLPM_LBCA = NA, pA_CLPM_LBCA = NA, ciL_A_CLPM_LBCA = NA, ciU_A_CLPM_LBCA = NA,
+        estA_CLPM_XGB  = NA, pA_CLPM_XGB  = NA, ciL_A_CLPM_XGB  = NA, ciU_A_CLPM_XGB  = NA,
 
-        # AR Y
-        estAY_CLPM      = NA,
-        estAY_RI_CLPM   = NA,
-        estAY_DPM       = NA,
-        estAY_CLPM_Adj  = NA,
-        estAY_CLPM_LBCA = NA,
-        estAY_CLPM_XGB  = NA,
+        # AR Y (est + p + CI)
+        estAY_CLPM      = NA, pAY_CLPM      = NA, ciL_AY_CLPM      = NA, ciU_AY_CLPM      = NA,
+        estAY_RI_CLPM   = NA, pAY_RI_CLPM   = NA, ciL_AY_RI_CLPM   = NA, ciU_AY_RI_CLPM   = NA,
+        estAY_DPM       = NA, pAY_DPM       = NA, ciL_AY_DPM       = NA, ciU_AY_DPM       = NA,
+        estAY_CLPM_Adj  = NA, pAY_CLPM_Adj  = NA, ciL_AY_CLPM_Adj  = NA, ciU_AY_CLPM_Adj  = NA,
+        estAY_CLPM_LBCA = NA, pAY_CLPM_LBCA = NA, ciL_AY_CLPM_LBCA = NA, ciU_AY_CLPM_LBCA = NA,
+        estAY_CLPM_XGB  = NA, pAY_CLPM_XGB  = NA, ciL_AY_CLPM_XGB  = NA, ciU_AY_CLPM_XGB  = NA,
 
-        estRho_CLPM = NA,
+        # residual correlation
+        # (NEW) now also p-value and CI for all methods
+        estRho_CLPM      = NA, pRho_CLPM      = NA, ciL_Rho_CLPM      = NA, ciU_Rho_CLPM      = NA,
+        estRho_RI_CLPM   = NA, pRho_RI_CLPM   = NA, ciL_Rho_RI_CLPM   = NA, ciU_Rho_RI_CLPM   = NA,
+        estRho_DPM       = NA, pRho_DPM       = NA, ciL_Rho_DPM       = NA, ciU_Rho_DPM       = NA,
+        estRho_CLPM_Adj  = NA, pRho_CLPM_Adj  = NA, ciL_Rho_CLPM_Adj  = NA, ciU_Rho_CLPM_Adj  = NA,
+        estRho_CLPM_LBCA = NA, pRho_CLPM_LBCA = NA, ciL_Rho_CLPM_LBCA = NA, ciU_Rho_CLPM_LBCA = NA,
+        estRho_CLPM_XGB  = NA, pRho_CLPM_XGB  = NA, ciL_Rho_CLPM_XGB  = NA, ciU_Rho_CLPM_XGB  = NA,
 
         fail_CLPM      = TRUE,
         fail_RI_CLPM   = TRUE,
@@ -1534,16 +1512,22 @@ run_one_rep_study2 <- function(
     fit_lbca     <- res_lbca$fit
     fit_xgb      <- res_xgb$fit
 
-    # extract lagged parameters
-    lag_raw  <- extract_lagged_parameters(fit_clpm_raw, T, "clpm")
-    lag_ric  <- extract_lagged_parameters(fit_ric,       T, "riclpm")
-    lag_dpm0 <- extract_lagged_parameters(fit_dpm0,      T, "dpm")
-    lag_adj  <- extract_lagged_parameters(fit_adj,       T, "clpm")
-    lag_lbca <- extract_lagged_parameters(fit_lbca,      T, "clpm")
-    lag_xgb  <- extract_lagged_parameters(fit_xgb,       T, "clpm")
+    # extract lagged parameters (NOW includes p-values + CI)
+    lag_raw  <- extract_lagged_parameters(fit_clpm_raw, T, "clpm",    ci_level = ci_level)
+    lag_ric  <- extract_lagged_parameters(fit_ric,       T, "riclpm",  ci_level = ci_level)
+    lag_dpm0 <- extract_lagged_parameters(fit_dpm0,      T, "dpm",     ci_level = ci_level)
+    lag_adj  <- extract_lagged_parameters(fit_adj,       T, "clpm",    ci_level = ci_level)
+    lag_lbca <- extract_lagged_parameters(fit_lbca,      T, "clpm",    ci_level = ci_level)
+    lag_xgb  <- extract_lagged_parameters(fit_xgb,       T, "clpm",    ci_level = ci_level)
 
     # residual correlations
-    rho_clpm <- extract_rho_vec(fit_clpm_raw, T, "clpm")
+    # (NEW) now returns a data.frame with est, p, CI for all methods
+    rho_clpm <- extract_rho_vec(fit_clpm_raw, T, "clpm",   ci_level = ci_level)
+    rho_ric  <- extract_rho_vec(fit_ric,      T, "riclpm", ci_level = ci_level)
+    rho_dpm  <- extract_rho_vec(fit_dpm0,     T, "dpm",    ci_level = ci_level)
+    rho_adj  <- extract_rho_vec(fit_adj,      T, "clpm",   ci_level = ci_level)
+    rho_lbca <- extract_rho_vec(fit_lbca,     T, "clpm",   ci_level = ci_level)
+    rho_xgb  <- extract_rho_vec(fit_xgb,      T, "clpm",   ci_level = ci_level)
 
     # assemble output row
     out_list[[j]] <- data.frame(
@@ -1556,40 +1540,161 @@ run_one_rep_study2 <- function(
       beta_X   = beta_X_vec,
       beta_Y   = beta_Y_vec,
 
-      # cross-lag XY
-      estXY_CLPM      = c(NA, lag_raw$xy),
-      estXY_RI_CLPM   = c(NA, lag_ric$xy),
-      estXY_DPM       = c(NA, lag_dpm0$xy),
-      estXY_CLPM_Adj  = c(NA, lag_adj$xy),
-      estXY_CLPM_LBCA = c(NA, lag_lbca$xy),
-      estXY_CLPM_XGB  = c(NA, lag_xgb$xy),
+      # cross-lag XY (X → Y)
+      estXY_CLPM      = c(NA, lag_raw$xy$est),
+      pXY_CLPM        = c(NA, lag_raw$xy$p),
+      ciL_XY_CLPM     = c(NA, lag_raw$xy$ci.lower),
+      ciU_XY_CLPM     = c(NA, lag_raw$xy$ci.upper),
 
-      # cross-lag YX
-      estYX_CLPM      = c(NA, lag_raw$yx),
-      estYX_RI_CLPM   = c(NA, lag_ric$yx),
-      estYX_DPM       = c(NA, lag_dpm0$yx),
-      estYX_CLPM_Adj  = c(NA, lag_adj$yx),
-      estYX_CLPM_LBCA = c(NA, lag_lbca$yx),
-      estYX_CLPM_XGB  = c(NA, lag_xgb$yx),
+      estXY_RI_CLPM   = c(NA, lag_ric$xy$est),
+      pXY_RI_CLPM     = c(NA, lag_ric$xy$p),
+      ciL_XY_RI_CLPM  = c(NA, lag_ric$xy$ci.lower),
+      ciU_XY_RI_CLPM  = c(NA, lag_ric$xy$ci.upper),
+
+      estXY_DPM       = c(NA, lag_dpm0$xy$est),
+      pXY_DPM         = c(NA, lag_dpm0$xy$p),
+      ciL_XY_DPM      = c(NA, lag_dpm0$xy$ci.lower),
+      ciU_XY_DPM      = c(NA, lag_dpm0$xy$ci.upper),
+
+      estXY_CLPM_Adj  = c(NA, lag_adj$xy$est),
+      pXY_CLPM_Adj    = c(NA, lag_adj$xy$p),
+      ciL_XY_CLPM_Adj = c(NA, lag_adj$xy$ci.lower),
+      ciU_XY_CLPM_Adj = c(NA, lag_adj$xy$ci.upper),
+
+      estXY_CLPM_LBCA  = c(NA, lag_lbca$xy$est),
+      pXY_CLPM_LBCA    = c(NA, lag_lbca$xy$p),
+      ciL_XY_CLPM_LBCA = c(NA, lag_lbca$xy$ci.lower),
+      ciU_XY_CLPM_LBCA = c(NA, lag_lbca$xy$ci.upper),
+
+      estXY_CLPM_XGB  = c(NA, lag_xgb$xy$est),
+      pXY_CLPM_XGB    = c(NA, lag_xgb$xy$p),
+      ciL_XY_CLPM_XGB = c(NA, lag_xgb$xy$ci.lower),
+      ciU_XY_CLPM_XGB = c(NA, lag_xgb$xy$ci.upper),
+
+      # cross-lag YX (Y → X)
+      estYX_CLPM      = c(NA, lag_raw$yx$est),
+      pYX_CLPM        = c(NA, lag_raw$yx$p),
+      ciL_YX_CLPM     = c(NA, lag_raw$yx$ci.lower),
+      ciU_YX_CLPM     = c(NA, lag_raw$yx$ci.upper),
+
+      estYX_RI_CLPM   = c(NA, lag_ric$yx$est),
+      pYX_RI_CLPM     = c(NA, lag_ric$yx$p),
+      ciL_YX_RI_CLPM  = c(NA, lag_ric$yx$ci.lower),
+      ciU_YX_RI_CLPM  = c(NA, lag_ric$yx$ci.upper),
+
+      estYX_DPM       = c(NA, lag_dpm0$yx$est),
+      pYX_DPM         = c(NA, lag_dpm0$yx$p),
+      ciL_YX_DPM      = c(NA, lag_dpm0$yx$ci.lower),
+      ciU_YX_DPM      = c(NA, lag_dpm0$yx$ci.upper),
+
+      estYX_CLPM_Adj  = c(NA, lag_adj$yx$est),
+      pYX_CLPM_Adj    = c(NA, lag_adj$yx$p),
+      ciL_YX_CLPM_Adj = c(NA, lag_adj$yx$ci.lower),
+      ciU_YX_CLPM_Adj = c(NA, lag_adj$yx$ci.upper),
+
+      estYX_CLPM_LBCA  = c(NA, lag_lbca$yx$est),
+      pYX_CLPM_LBCA    = c(NA, lag_lbca$yx$p),
+      ciL_YX_CLPM_LBCA = c(NA, lag_lbca$yx$ci.lower),
+      ciU_YX_CLPM_LBCA = c(NA, lag_lbca$yx$ci.upper),
+
+      estYX_CLPM_XGB  = c(NA, lag_xgb$yx$est),
+      pYX_CLPM_XGB    = c(NA, lag_xgb$yx$p),
+      ciL_YX_CLPM_XGB = c(NA, lag_xgb$yx$ci.lower),
+      ciU_YX_CLPM_XGB = c(NA, lag_xgb$yx$ci.upper),
 
       # autoregressive X
-      estA_CLPM      = c(NA, lag_raw$ar_x),
-      estA_RI_CLPM   = c(NA, lag_ric$ar_x),
-      estA_DPM       = c(NA, lag_dpm0$ar_x),
-      estA_CLPM_Adj  = c(NA, lag_adj$ar_x),
-      estA_CLPM_LBCA = c(NA, lag_lbca$ar_x),
-      estA_CLPM_XGB  = c(NA, lag_xgb$ar_x),
+      estA_CLPM      = c(NA, lag_raw$ar_x$est),
+      pA_CLPM        = c(NA, lag_raw$ar_x$p),
+      ciL_A_CLPM     = c(NA, lag_raw$ar_x$ci.lower),
+      ciU_A_CLPM     = c(NA, lag_raw$ar_x$ci.upper),
 
-      # autoregressive Y 
-      estAY_CLPM      = c(NA, lag_raw$ar_y),
-      estAY_RI_CLPM   = c(NA, lag_ric$ar_y),
-      estAY_DPM       = c(NA, lag_dpm0$ar_y),
-      estAY_CLPM_Adj  = c(NA, lag_adj$ar_y),
-      estAY_CLPM_LBCA = c(NA, lag_lbca$ar_y),
-      estAY_CLPM_XGB  = c(NA, lag_xgb$ar_y),
+      estA_RI_CLPM   = c(NA, lag_ric$ar_x$est),
+      pA_RI_CLPM     = c(NA, lag_ric$ar_x$p),
+      ciL_A_RI_CLPM  = c(NA, lag_ric$ar_x$ci.lower),
+      ciU_A_RI_CLPM  = c(NA, lag_ric$ar_x$ci.upper),
+
+      estA_DPM       = c(NA, lag_dpm0$ar_x$est),
+      pA_DPM         = c(NA, lag_dpm0$ar_x$p),
+      ciL_A_DPM      = c(NA, lag_dpm0$ar_x$ci.lower),
+      ciU_A_DPM      = c(NA, lag_dpm0$ar_x$ci.upper),
+
+      estA_CLPM_Adj  = c(NA, lag_adj$ar_x$est),
+      pA_CLPM_Adj    = c(NA, lag_adj$ar_x$p),
+      ciL_A_CLPM_Adj = c(NA, lag_adj$ar_x$ci.lower),
+      ciU_A_CLPM_Adj = c(NA, lag_adj$ar_x$ci.upper),
+
+      estA_CLPM_LBCA  = c(NA, lag_lbca$ar_x$est),
+      pA_CLPM_LBCA    = c(NA, lag_lbca$ar_x$p),
+      ciL_A_CLPM_LBCA = c(NA, lag_lbca$ar_x$ci.lower),
+      ciU_A_CLPM_LBCA = c(NA, lag_lbca$ar_x$ci.upper),
+
+      estA_CLPM_XGB  = c(NA, lag_xgb$ar_x$est),
+      pA_CLPM_XGB    = c(NA, lag_xgb$ar_x$p),
+      ciL_A_CLPM_XGB = c(NA, lag_xgb$ar_x$ci.lower),
+      ciU_A_CLPM_XGB = c(NA, lag_xgb$ar_x$ci.upper),
+
+      # autoregressive Y
+      estAY_CLPM      = c(NA, lag_raw$ar_y$est),
+      pAY_CLPM        = c(NA, lag_raw$ar_y$p),
+      ciL_AY_CLPM     = c(NA, lag_raw$ar_y$ci.lower),
+      ciU_AY_CLPM     = c(NA, lag_raw$ar_y$ci.upper),
+
+      estAY_RI_CLPM   = c(NA, lag_ric$ar_y$est),
+      pAY_RI_CLPM     = c(NA, lag_ric$ar_y$p),
+      ciL_AY_RI_CLPM  = c(NA, lag_ric$ar_y$ci.lower),
+      ciU_AY_RI_CLPM  = c(NA, lag_ric$ar_y$ci.upper),
+
+      estAY_DPM       = c(NA, lag_dpm0$ar_y$est),
+      pAY_DPM         = c(NA, lag_dpm0$ar_y$p),
+      ciL_AY_DPM      = c(NA, lag_dpm0$ar_y$ci.lower),
+      ciU_AY_DPM      = c(NA, lag_dpm0$ar_y$ci.upper),
+
+      estAY_CLPM_Adj  = c(NA, lag_adj$ar_y$est),
+      pAY_CLPM_Adj    = c(NA, lag_adj$ar_y$p),
+      ciL_AY_CLPM_Adj = c(NA, lag_adj$ar_y$ci.lower),
+      ciU_AY_CLPM_Adj = c(NA, lag_adj$ar_y$ci.upper),
+
+      estAY_CLPM_LBCA  = c(NA, lag_lbca$ar_y$est),
+      pAY_CLPM_LBCA    = c(NA, lag_lbca$ar_y$p),
+      ciL_AY_CLPM_LBCA = c(NA, lag_lbca$ar_y$ci.lower),
+      ciU_AY_CLPM_LBCA = c(NA, lag_lbca$ar_y$ci.upper),
+
+      estAY_CLPM_XGB  = c(NA, lag_xgb$ar_y$est),
+      pAY_CLPM_XGB    = c(NA, lag_xgb$ar_y$p),
+      ciL_AY_CLPM_XGB = c(NA, lag_xgb$ar_y$ci.lower),
+      ciU_AY_CLPM_XGB = c(NA, lag_xgb$ar_y$ci.upper),
 
       # residual correlation
-      estRho_CLPM = rho_clpm,
+      # (NEW) now output est + p + CI for all methods
+      estRho_CLPM      = rho_clpm$est,
+      pRho_CLPM        = rho_clpm$p,
+      ciL_Rho_CLPM     = rho_clpm$ci.lower,
+      ciU_Rho_CLPM     = rho_clpm$ci.upper,
+
+      estRho_RI_CLPM   = rho_ric$est,
+      pRho_RI_CLPM     = rho_ric$p,
+      ciL_Rho_RI_CLPM  = rho_ric$ci.lower,
+      ciU_Rho_RI_CLPM  = rho_ric$ci.upper,
+
+      estRho_DPM       = rho_dpm$est,
+      pRho_DPM         = rho_dpm$p,
+      ciL_Rho_DPM      = rho_dpm$ci.lower,
+      ciU_Rho_DPM      = rho_dpm$ci.upper,
+
+      estRho_CLPM_Adj  = rho_adj$est,
+      pRho_CLPM_Adj    = rho_adj$p,
+      ciL_Rho_CLPM_Adj = rho_adj$ci.lower,
+      ciU_Rho_CLPM_Adj = rho_adj$ci.upper,
+
+      estRho_CLPM_LBCA  = rho_lbca$est,
+      pRho_CLPM_LBCA    = rho_lbca$p,
+      ciL_Rho_CLPM_LBCA = rho_lbca$ci.lower,
+      ciU_Rho_CLPM_LBCA = rho_lbca$ci.upper,
+
+      estRho_CLPM_XGB  = rho_xgb$est,
+      pRho_CLPM_XGB    = rho_xgb$p,
+      ciL_Rho_CLPM_XGB = rho_xgb$ci.lower,
+      ciU_Rho_CLPM_XGB = rho_xgb$ci.upper,
 
       # failure indicators
       fail_CLPM      = is.null(fit_clpm_raw),
@@ -1603,14 +1708,14 @@ run_one_rep_study2 <- function(
       err_CLPM      = rep(res_clpm$err,   T),
       err_RI_CLPM   = rep(res_ric$err,    T),
       err_DPM       = rep(res_dpm0$err,   T),
-      err_CLPM_Adj  = rep(res_adj$err,   T),
-      err_CLPM_LBCA = rep(res_lbca$err,  T),
-      err_CLPM_XGB  = rep(res_xgb$err,   T),
+      err_CLPM_Adj  = rep(res_adj$err,    T),
+      err_CLPM_LBCA = rep(res_lbca$err,   T),
+      err_CLPM_XGB  = rep(res_xgb$err,    T),
 
       # NA run marker
       is_na_run = as.integer(all(is.na(c(
-        lag_raw$xy, lag_ric$xy, lag_dpm0$xy,
-        lag_adj$xy, lag_lbca$xy, lag_xgb$xy
+        lag_raw$xy$est, lag_ric$xy$est, lag_dpm0$xy$est,
+        lag_adj$xy$est, lag_lbca$xy$est, lag_xgb$xy$est
       ))))
     )
   }
@@ -1627,16 +1732,15 @@ run_simulation_study2 <- function(
     N,                                                                       # sample size
     T,                                                                       # number of waves
     k,                                                                       # number of linear confounders
-    R2_1,                                                                    # confounder R^2 at wave 1
-    eta_1,                                                                   # share of R^2 due to non-linear confounding
-    target_sd,                                                               # SD of time-varying B
     scenarios,                                                               # e.g., c("constant","stepwise")
+    B_scenarios,                                                             # (NEW) user-supplied B matrices per scenario
     A,                                                                       # 2×2 AR + cross-lag matrix
     Psi,                                                                     # k×k confounder covariance
     rho_extra,                                                               # extra covariance added to observations
     models_to_run,                                                           # c("clpm","riclpm","dpm","adj","lbca","xgb")
     cores = NULL,                                                            # default is detectCores()/2
-    base_seed = 1234                                                         # master seed for reproducible reps
+    base_seed = 1234,                                                        # master seed for reproducible reps
+    ci_level = 0.95                                                          # CI level for extracted parameters
 ) {
 
   # if the number of cores is not specified, detect and use half of available cores
@@ -1655,21 +1759,18 @@ run_simulation_study2 <- function(
     # set seed for pilot so it is reproducible
     set.seed(base_seed + 1)
 
-    # sample baseline confounder effects matrix B1
-    B1_pilot <- sample_B_int(
-      k     = k,
-      R2_1  = R2_1,
-      eta_1 = eta_1
-    )
-
-    # choose trajectory generator
-    if (scen_tune == "constant") {
-      B_list_pilot <- generate_B_constant(B1_pilot, T)
-    } else if (scen_tune == "stepwise") {
-      B_list_pilot <- generate_B_stepwise(B1_pilot, T, target_sd = target_sd)
+    # pull pilot B from user-supplied scenarios
+    B_in_pilot <- NULL
+    if (is.list(B_scenarios) && !is.null(names(B_scenarios)) && scen_tune %in% names(B_scenarios)) {
+      B_in_pilot <- B_scenarios[[scen_tune]]
+    } else if (is.list(B_scenarios) && is.null(names(B_scenarios)) && length(B_scenarios) >= 1L) {
+      B_in_pilot <- B_scenarios[[1]]
     } else {
-      stop("Unknown scenario: ", scen_tune)
+      stop("For xgb tuning, could not map B_scenarios to the first scenario. Provide a named list or an aligned list.")
     }
+
+    # coerce to list-of-length-T
+    B_list_pilot <- as_B_list(B_in_pilot, T)
 
     # simulate pilot data
     df_pilot <- simulate_panel_data_int(
@@ -1682,6 +1783,7 @@ run_simulation_study2 <- function(
     )
 
     # tune and store globally so residualise_panel_xgb can access it
+    # (CHANGED) now returns separate tuning for X and Y
     XGB_TUNED <- tune_xgb_once(df_pilot, k)
     assign("XGB_TUNED", XGB_TUNED, envir = .GlobalEnv)
 
@@ -1704,15 +1806,14 @@ run_simulation_study2 <- function(
           N             = N,
           T             = T,
           k             = k,
-          R2_1          = R2_1,
-          eta_1         = eta_1,
-          target_sd     = target_sd,
           scenarios     = scenarios,
+          B_scenarios   = B_scenarios,
           A             = A,
           Psi           = Psi,
           rho_extra     = rho_extra,
           models_to_run = models_to_run,
-          base_seed     = base_seed
+          base_seed     = base_seed,
+          ci_level      = ci_level
         )
       }
     )
@@ -1734,10 +1835,9 @@ run_simulation_study2 <- function(
   parallel::clusterExport(
     cl,
     c(
-      # sampling + simulation
-      "sample_B_int",
-      "generate_B_constant",
-      "generate_B_stepwise",
+      # B helpers + simulation
+      "n_interactions_from_k",
+      "as_B_list",
       "simulate_panel_data_int",
 
       # model builders
@@ -1748,7 +1848,7 @@ run_simulation_study2 <- function(
 
       # residualisers
       "residualise_panel_linearC",
-      "residualise_panel_xgb",
+      "residualise_panel_xgb",     # (CHANGED) now expects separate X/Y tuning in XGB_TUNED
 
       # safe fitters
       "safe_fit_clpm",
@@ -1766,8 +1866,8 @@ run_simulation_study2 <- function(
       "run_one_rep_study2",
 
       # arguments
-      "N","T","k","R2_1","eta_1","target_sd","scenarios",
-      "A","Psi","rho_extra","models_to_run","base_seed",
+      "N","T","k","scenarios","B_scenarios",
+      "A","Psi","rho_extra","models_to_run","base_seed","ci_level",
 
       # tuned xgb settings
       "XGB_TUNED"
@@ -1785,15 +1885,14 @@ run_simulation_study2 <- function(
         N             = N,
         T             = T,
         k             = k,
-        R2_1          = R2_1,
-        eta_1         = eta_1,
-        target_sd     = target_sd,
         scenarios     = scenarios,
+        B_scenarios   = B_scenarios,
         A             = A,
         Psi           = Psi,
         rho_extra     = rho_extra,
         models_to_run = models_to_run,
-        base_seed     = base_seed
+        base_seed     = base_seed,
+        ci_level      = ci_level
       )
     }
   )

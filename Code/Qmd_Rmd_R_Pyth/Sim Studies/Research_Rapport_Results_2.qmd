@@ -1,0 +1,3804 @@
+---
+title: "Research Rapport Results 2"
+format: html
+---
+
+# Simulation Study 1 Results
+
+This script provides the revised results for the research rapport simulations. Lets start by running simulation one from script.
+
+### Helpers
+
+```{r helpers, message=FALSE, warning=FALSE}
+
+sample_B1 <- function(
+  k,
+  R2_1,
+  eta_1 = 0.0,
+  min_abs = 0.01,
+  max_abs = 0.60,
+  max_tries = 100000
+) {
+
+  if (eta_1 < 0 || eta_1 > 1)
+    stop("eta_1 must be between 0 and 1")
+
+  k_lin <- k
+  k_non <- if (eta_1 > 0) {
+    sum(sapply(2:k, function(m) choose(k, m)))
+  } else 0
+
+  R2_lin <- (1 - eta_1) * R2_1
+  R2_non <- eta_1 * R2_1
+
+  for (i in seq_len(max_tries)) {
+
+    # linear effects
+    bx_lin <- if (k_lin > 0 && R2_lin > 0) {
+      v <- rnorm(k_lin)
+      sqrt(R2_lin) * v / sqrt(sum(v^2))
+    } else numeric(0)
+
+    by_lin <- if (k_lin > 0 && R2_lin > 0) {
+      v <- rnorm(k_lin)
+      sqrt(R2_lin) * v / sqrt(sum(v^2))
+    } else numeric(0)
+
+    # non-linear effects
+    bx_non <- by_non <- numeric(0)
+
+    if (k_non > 0 && R2_non > 0) {
+      v <- rnorm(k_non)
+      bx_non <- sqrt(R2_non) * v / sqrt(sum(v^2))
+
+      v <- rnorm(k_non)
+      by_non <- sqrt(R2_non) * v / sqrt(sum(v^2))
+    }
+
+    bx <- c(bx_lin, bx_non)
+    by <- c(by_lin, by_non)
+
+    if (all(abs(c(bx, by)) >= min_abs & abs(c(bx, by)) <= max_abs)) {
+
+      B1 <- rbind(bx, by)
+      rownames(B1) <- c("X", "Y")
+
+      # column names (MATCH simulator exactly)
+      if (k_non == 0) {
+        colnames(B1) <- paste0("c", 1:k)
+      } else {
+        int_names <- unlist(
+          lapply(2:k, function(m)
+            combn(1:k, m, FUN = function(ix)
+              paste0("c", paste(ix, collapse=":")))
+          )
+        )
+        colnames(B1) <- c(paste0("c", 1:k), int_names)
+      }
+
+      return(B1)
+    }
+  }
+
+  stop("Failed to sample B1 within max_tries")
+}
+
+```
+
+### Generating Results Simulation Study 1
+
+```{r simulation study 1}
+
+# load the function and dependencies
+source("Thesis\\Code\\Qmd_Rmd_R_Pyth\\Sim Studies\\Sim_Study_1_RR_no_sampling.R")
+
+# set a seed for reproducibility
+set.seed(1234)
+
+# autoregressive + cross-lag structure
+A <- matrix(c(
+  0.20, 0,                         # autoregressive and cross-lag for Y
+  0.10, 0.20                       # cross-lag and autoregressive for X
+), nrow = 2, byrow = TRUE)
+
+# confounder covariance (3 confounders)
+Psi <- diag(3)                     # uncorrelated confounders with var=1
+
+# sample B1 matrix
+B1 <- sample_B1(
+  k = 3,
+  R2_1 = 0.15,
+  eta_1 = 0,
+  min_abs = 0.001,
+  max_abs = 0.40
+)
+
+# for the constant scenario, replicate B1 across time points
+B_constant <- lapply(1:5, function(t) B1)
+
+# scaling factor such that R_2 becomes twice as large: scaling factor = sqrt(old R2 / new R2)
+scale_factor <- sqrt(0.40 / 0.15)              # = 1.414214
+                                  
+# create beta list for increasing R2 scenario
+B_high <- B1 * scale_factor
+
+# fill the list
+B_stepwise <- list(
+  t1 = B1,
+  t2 = B1,
+  t3 = B1,
+  t4 = B_high,
+  t5 = B_high
+)
+
+# run Simulation Study 1
+results_sim1 <- run_simulation_study1(
+  reps        = 1000,                                  # replications
+  N           = 1000,                                  # sample size
+  T           = 5,                                     # number of time points
+  k           = 3,                                     # number of confounders
+  scenarios   = c("constant", "stepwise"),             # B scenarios
+  B_scenarios = list(                                  # beta trajectories
+    constant = B_constant,
+    stepwise = B_stepwise
+  ),
+  A           = A,                                     # autoregressive + cross-lag matrix
+  Psi         = Psi,                                   # confounder covariance matrix
+  rho_extra  = 0.1,                                    # extra correlation among X_t and Y_t
+  models_to_run = c(                                   # models to run
+    "clpm",
+    "riclpm",
+    "dpm",
+    "adj",
+    "lbca"
+  ),
+  cores       = 6,                                     # number of cores for parallel processing
+  base_seed  = 12345                                   # base seed for reproducibility
+)
+
+```
+
+### Plot 0.1: Beta trajectory plots Simulation Study 1
+
+This plot shows how the confounder effects (betas) change over time in Simulation Study 1. Each line represents one confounder. In the constant scenario the effects stay the same across occasions, while in the stepwise scenario they increase at later occasions by design.
+
+```{r}
+
+# libraries
+library(tidyverse)
+library(ggh4x)
+library(colorspace)
+
+# first load the data
+df1 <- results_sim1 
+
+# how many runs were not successful?
+sum(df1$is_na_run)
+
+# custom colour palette (scientific, colorblind-friendly)
+pal_beta <- qualitative_hcl(
+  n = ncol(B1),
+  palette = "Set 2"
+)
+
+# number of occasions
+T <- length(B_stepwise)              # = 5
+
+# number of confounders
+k <- ncol(B1)                        # = 3
+
+# build dataframe for beta trajectories
+df_beta <- bind_rows(
+
+  # constant betas (same B at each occasion)
+  lapply(1:T, function(t) {
+    tibble(
+      occasion   = t,                        # time point
+      confounder = factor(1:k),               # confounder index
+      beta_X     = B_constant[[t]][1, ],      # effect of C on X
+      beta_Y     = B_constant[[t]][2, ],      # effect of C on Y
+      scenario   = "constant"                 # scenario label
+    )
+  }),
+
+  # stepwise betas (increase at later occasions)
+  lapply(1:T, function(t) {
+    tibble(
+      occasion   = t,                        # time point
+      confounder = factor(1:k),               # confounder index
+      beta_X     = B_stepwise[[t]][1, ],      # effect of C on X
+      beta_Y     = B_stepwise[[t]][2, ],      # effect of C on Y
+      scenario   = "stepwise"                 # scenario label
+    )
+  })
+)
+
+# plot the effect of the confounders on X over time
+plot_beta_X <- df_beta %>%
+
+  # ensure ordered labels for legend
+  mutate(confounder = factor(
+    confounder,
+    levels = 1:k,
+    labels = paste0("C", 1:k)
+  )) %>%
+
+  # occasion on X-axis, beta_X on Y-axis
+  # one line per confounder
+  ggplot(aes(
+    x     = occasion,
+    y     = beta_X,
+    group = confounder,
+    color = confounder
+  )) +
+
+  # draw beta trajectories
+  geom_line(linewidth = 0.9, alpha = 0.9) +
+
+  # separate plots for each scenario
+  ggh4x::facet_wrap2(
+    ~ scenario,
+    nrow = 1,
+    axes = "y"
+  ) +
+
+  # use scientific colour palette
+  scale_color_manual(
+    values = pal_beta,
+    guide = guide_legend(nrow = 1)
+  ) +
+
+  # axis labels
+  labs(
+    x = "Occasion",
+    y = "Effect of Confounder on X",
+    color = NULL
+  ) +
+
+  # scientific theme
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12),
+    plot.margin     = margin(t = 8, r = 8, b = 12, l = 10)
+  )
+
+
+# plot the effect of the confounders on Y over time
+plot_beta_Y <- df_beta %>%
+
+  # ensure ordered labels for legend
+  mutate(confounder = factor(
+    confounder,
+    levels = 1:k,
+    labels = paste0("C", 1:k)
+  )) %>%
+
+  # occasion on X-axis, beta_Y on Y-axis
+  # one line per confounder
+  ggplot(aes(
+    x     = occasion,
+    y     = beta_Y,
+    group = confounder,
+    color = confounder
+  )) +
+
+  # draw beta trajectories
+  geom_line(linewidth = 0.9, alpha = 0.9) +
+
+  # separate plots for each scenario
+  ggh4x::facet_wrap2(
+    ~ scenario,
+    nrow = 1,
+    axes = "y"
+  ) +
+
+  # use scientific colour palette
+  scale_color_manual(
+    values = pal_beta,
+    guide = guide_legend(nrow = 1)
+  ) +
+
+  # axis labels
+  labs(
+    x = "Occasion",
+    y = "Effect of Confounder on Y",
+    color = NULL
+  ) +
+
+  # scientific theme
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12),
+    plot.margin     = margin(t = 8, r = 8, b = 12, l = 10)
+  )
+
+# display the plots
+plot_beta_X
+plot_beta_Y
+
+```
+
+### Plot 0.2: R squared trajectory plots of the confounders Simulation Study 1
+
+This plot shows how the explained variance (R²) of the confounders changes over time in Simulation Study 1. Each line represents one confounder, and the total line shows their combined explained variance. In the constant scenario the explained variance stays stable across occasions, while in the stepwise scenario it increases at later occasions by design.
+
+```{r R squared plots}
+
+# name the palette to match confounder labels
+pal_beta_named <- setNames(pal_beta, paste0("C", 1:k))
+
+# plot the R^2 of confounders on X over time
+plot_R2_X <- df_beta %>%
+
+  # compute R^2 and relabel confounders
+  mutate(
+    R2 = beta_X^2,
+    confounder = factor(
+      confounder,
+      levels = 1:k,
+      labels = paste0("C", 1:k)
+    )
+  ) %>%
+
+  # add total R^2 per occasion and scenario
+  bind_rows(
+    df_beta %>%
+      mutate(R2 = beta_X^2) %>%
+      group_by(occasion, scenario) %>%
+      summarise(
+        R2 = sum(R2),
+        confounder = "Total",
+        .groups = "drop"
+      )
+  ) %>%
+
+  # occasion on X-axis, R^2 on Y-axis
+  ggplot(aes(
+    x     = occasion,
+    y     = R2,
+    group = confounder,
+    color = confounder
+  )) +
+
+  # draw R^2 trajectories
+  geom_line(linewidth = 0.9, alpha = 0.9) +
+
+  # separate plots for each scenario
+  ggh4x::facet_wrap2(
+    ~ scenario,
+    nrow = 1,
+    axes = "y"
+  ) +
+
+  # correctly mapped colours + legend order
+  scale_color_manual(
+    values = c(pal_beta_named, Total = "black"),
+    breaks = c(paste0("C", 1:k), "Total"),
+    guide  = guide_legend(nrow = 1)
+  ) +
+
+  # axis labels
+  labs(
+    x = "Occasion",
+    y = "Explained variance (R^2) of confounders on X",
+    color = NULL
+  ) +
+
+  # scientific theme
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12),
+    plot.margin     = margin(t = 8, r = 8, b = 12, l = 10)
+  )
+
+
+# plot the R^2 of confounders on Y over time
+plot_R2_Y <- df_beta %>%
+
+  # compute R^2 and relabel confounders
+  mutate(
+    R2 = beta_Y^2,
+    confounder = factor(
+      confounder,
+      levels = 1:k,
+      labels = paste0("C", 1:k)
+    )
+  ) %>%
+
+  # add total R^2 per occasion and scenario
+  bind_rows(
+    df_beta %>%
+      mutate(R2 = beta_Y^2) %>%
+      group_by(occasion, scenario) %>%
+      summarise(
+        R2 = sum(R2),
+        confounder = "Total",
+        .groups = "drop"
+      )
+  ) %>%
+
+  # occasion on X-axis, R^2 on Y-axis
+  ggplot(aes(
+    x     = occasion,
+    y     = R2,
+    group = confounder,
+    color = confounder
+  )) +
+
+  # draw R^2 trajectories
+  geom_line(linewidth = 0.9, alpha = 0.9) +
+
+  # separate plots for each scenario
+  ggh4x::facet_wrap2(
+    ~ scenario,
+    nrow = 1,
+    axes = "y"
+  ) +
+
+  # correctly mapped colours + legend order
+  scale_color_manual(
+    values = c(pal_beta_named, Total = "black"),
+    breaks = c(paste0("C", 1:k), "Total"),
+    guide  = guide_legend(nrow = 1)
+  ) +
+
+  # axis labels
+  labs(
+    x = "Occasion",
+    y = "Explained variance (R^2) of confounders on Y",
+    color = NULL
+  ) +
+
+  # scientific theme
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12),
+    plot.margin     = margin(t = 8, r = 8, b = 12, l = 10)
+  )
+
+# display the plots
+plot_R2_X
+plot_R2_Y
+
+```
+
+### Plot 1.1: Relative Bias Simulation Study 1
+
+These plots show the relative bias of the estimated parameters across occasions in Simulation Study 1. Relative bias is computed as the difference between the estimated and true parameter value, divided by the true value. Because the true cross-lagged effect of Y on X equals zero, relative bias is not defined for this parameter and is therefore omitted from the figure.
+
+```{r relative bias plots}
+
+library(tidyverse)
+library(ggh4x)
+library(viridis)
+
+#####################################################
+# Build relative bias data for all lagged parameters
+#####################################################
+
+# true parameters from the data-generating model
+true_params <- tibble(
+  estimand = c("XY", "YX", "AX", "AY"),
+  true     = c(
+    A[2, 1],  # XY
+    A[1, 2],  # YX
+    A[1, 1],  # AX
+    A[2, 2]   # AY
+  )
+)
+
+# build relative bias data frame
+relbias_df <- results_sim1 %>%
+
+  # only occasions with lagged parameters
+  filter(occasion >= 2) %>%
+
+  # reshape estimates to long format
+  pivot_longer(
+    cols = matches("^est(XY|YX|A|AY)_"),
+    names_to  = "param",
+    values_to = "estimate"
+  ) %>%
+
+  # drop failed fits
+  filter(!is.na(estimate)) %>%
+
+  # identify estimand type and method
+  mutate(
+    estimand = case_when(
+      str_detect(param, "^estXY_") ~ "XY",
+      str_detect(param, "^estYX_") ~ "YX",
+      str_detect(param, "^estA_")  ~ "AX",
+      str_detect(param, "^estAY_") ~ "AY"
+    ),
+
+    method = param %>%
+      str_remove("^est(XY|YX|A|AY)_") %>%
+      recode(
+        CLPM      = "CLPM",
+        CLPM_Adj  = "True model",
+        CLPM_LBCA = "CLPM linear BCA",
+        DPM       = "DPM",
+        RI_CLPM   = "RI-CLPM"
+      )
+  ) %>%
+
+  # attach true parameter values
+  left_join(true_params, by = "estimand") %>%
+
+  # compute relative bias and Monte Carlo SE
+  group_by(scenario, occasion, estimand, method) %>%
+  reframe(
+    nsim = n(),
+
+    mean_est = mean(estimate),
+
+    # relative bias
+    rel_bias = (mean_est - true) / true,
+
+    # Monte Carlo SE of relative bias
+    mcse_rel_bias =
+      sqrt(
+        sum((estimate - mean_est)^2) /
+        (nsim * (nsim - 1))
+      ) / abs(true)
+  ) %>%
+
+  # set clean factor ordering
+  mutate(
+    scenario = factor(scenario, levels = c("constant", "stepwise")),
+    method   = factor(
+      method,
+      levels = c(
+        "CLPM",
+        "True model",
+        "CLPM linear BCA",
+        "DPM",
+        "RI-CLPM"
+      )
+    )
+  )
+
+#####################################################
+# Colour palette for methods (shared across plots)
+#####################################################
+
+pal_method <- viridis(
+  n = nlevels(relbias_df$method),
+  option = "viridis",
+  begin  = 0.1,
+  end    = 0.9
+)
+names(pal_method) <- levels(relbias_df$method)
+
+#####################################################
+# Plot 1: cross-lagged effect of X on Y (XY)
+#####################################################
+
+plot_relbias_XY <- relbias_df %>%
+  filter(estimand == "XY") %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = rel_bias,
+    color = method,
+    group = method
+  )) +
+
+  # relative bias trajectories
+  geom_line(linewidth = 0.9) +
+
+  # add points at each occasion
+  geom_point(size = 2) +
+
+  # Monte Carlo SE error bars
+  geom_errorbar(
+    aes(
+      ymin = rel_bias - mcse_rel_bias,
+      ymax = rel_bias + mcse_rel_bias
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+
+  # zero-bias reference line
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.4) +
+
+  # facet by scenario
+  ggh4x::facet_wrap2(
+    ~ scenario,
+    nrow = 1,
+    axes = "y"
+  ) +
+
+  # colours
+  scale_color_manual(values = pal_method) +
+
+  # labels
+  labs(
+    x = "Occasion",
+    y = "Relative bias",
+    color = NULL
+  ) +
+
+  # scientific theme
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Plot 2: autoregressive effect of X on X (AX)
+#####################################################
+
+plot_relbias_AX <- relbias_df %>%
+  filter(estimand == "AX") %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = rel_bias,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = rel_bias - mcse_rel_bias,
+      ymax = rel_bias + mcse_rel_bias
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.4) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(x = "Occasion", y = "Relative bias", color = NULL) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Plot 3: autoregressive effect of Y on Y (AY)
+#####################################################
+
+plot_relbias_AY <- relbias_df %>%
+  filter(estimand == "AY") %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = rel_bias,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = rel_bias - mcse_rel_bias,
+      ymax = rel_bias + mcse_rel_bias
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.4) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(x = "Occasion", y = "Relative bias", color = NULL) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Display all plots
+#####################################################
+
+plot_relbias_XY
+plot_relbias_AX
+plot_relbias_AY
+
+```
+
+### Plot 1.2: Bias Simulation Study 1
+
+These plots show the bias of the estimated parameters across occasions in Simulation Study 1. Bias is computed as the difference between the estimated and true parameter value and illustrates whether, and in which direction, the estimators systematically deviate from the data-generating values over time.
+
+```{r}
+
+#####################################################
+# Build bias data for all lagged parameters
+#####################################################
+
+# true parameters from the data-generating model
+true_params <- tibble(
+  estimand = c("XY", "YX", "AX", "AY"),
+  true     = c(
+    A[2, 1],  # XY
+    A[1, 2],  # YX (true = 0)
+    A[1, 1],  # AX
+    A[2, 2]   # AY
+  )
+)
+
+# build bias data frame
+bias_df <- results_sim1 %>%
+
+  # only occasions with lagged parameters
+  filter(occasion >= 2) %>%
+
+  # reshape estimates to long format
+  pivot_longer(
+    cols = matches("^est(XY|YX|A|AY)_"),
+    names_to  = "param",
+    values_to = "estimate"
+  ) %>%
+
+  # drop failed fits
+  filter(!is.na(estimate)) %>%
+
+  # identify estimand type and method
+  mutate(
+    estimand = case_when(
+      str_detect(param, "^estXY_") ~ "XY",
+      str_detect(param, "^estYX_") ~ "YX",
+      str_detect(param, "^estA_")  ~ "AX",
+      str_detect(param, "^estAY_") ~ "AY"
+    ),
+
+    method = param %>%
+      str_remove("^est(XY|YX|A|AY)_") %>%
+      recode(
+        CLPM      = "CLPM",
+        CLPM_Adj  = "True model",
+        CLPM_LBCA = "CLPM linear BCA",
+        DPM       = "DPM",
+        RI_CLPM   = "RI-CLPM"
+      )
+  ) %>%
+
+  # attach true parameter values
+  left_join(true_params, by = "estimand") %>%
+
+  # compute bias and Monte Carlo SE
+  group_by(scenario, occasion, estimand, method) %>%
+  reframe(
+    nsim = n(),
+
+    mean_est = mean(estimate),
+
+    # bias
+    bias = mean_est - true,
+
+    # Monte Carlo SE of the bias
+    mcse_bias =
+      sqrt(
+        sum((estimate - mean_est)^2) /
+        (nsim * (nsim - 1))
+      )
+  ) %>%
+
+  # clean factor ordering
+  mutate(
+    scenario = factor(scenario, levels = c("constant", "stepwise")),
+    method   = factor(
+      method,
+      levels = c(
+        "CLPM",
+        "True model",
+        "CLPM linear BCA",
+        "DPM",
+        "RI-CLPM"
+      )
+    )
+  )
+
+#####################################################
+# Colour palette for methods (shared across plots)
+#####################################################
+
+pal_method <- qualitative_hcl(
+  n = nlevels(bias_df$method),
+  palette = "Set 2"
+)
+names(pal_method) <- levels(bias_df$method)
+
+#####################################################
+# Plot 1: cross-lagged effect of X on Y (XY)
+#####################################################
+
+plot_bias_XY <- bias_df %>%
+  filter(estimand == "XY") %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = bias,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = bias - mcse_bias,
+      ymax = bias + mcse_bias
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.4) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(
+    x = "Occasion",
+    y = "Bias",
+    color = NULL
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Plot 2: cross-lagged effect of Y on X (YX)
+#####################################################
+
+plot_bias_YX <- bias_df %>%
+  filter(estimand == "YX") %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = bias,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = bias - mcse_bias,
+      ymax = bias + mcse_bias
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.4) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(
+    x = "Occasion",
+    y = "Bias",
+    color = NULL
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Plot 3: autoregressive effect of X on X (AX)
+#####################################################
+
+plot_bias_AX <- bias_df %>%
+  filter(estimand == "AX") %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = bias,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = bias - mcse_bias,
+      ymax = bias + mcse_bias
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.4) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(
+    x = "Occasion",
+    y = "Bias",
+    color = NULL
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Plot 4: autoregressive effect of Y on Y (AY)
+#####################################################
+
+plot_bias_AY <- bias_df %>%
+  filter(estimand == "AY") %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = bias,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = bias - mcse_bias,
+      ymax = bias + mcse_bias
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.4) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(
+    x = "Occasion",
+    y = "Bias",
+    color = NULL
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Display all plots
+#####################################################
+
+plot_bias_XY
+plot_bias_YX
+plot_bias_AX
+plot_bias_AY
+
+```
+
+### Plot 2: RMSE Simulation Study 1
+
+These plots show the root mean squared error (RMSE) of the estimated parameters across occasions in Simulation Study 1. RMSE combines both bias and variability, providing an overall measure of estimation accuracy over time for each method.
+
+```{r RMSE plots}
+library(tidyverse)
+library(ggh4x)
+library(viridis)
+
+#####################################################
+# Build RMSE data for all lagged parameters
+#####################################################
+
+# true parameters from the data-generating model
+true_params <- tibble(
+  estimand = c("XY", "YX", "AX", "AY"),
+  true     = c(
+    A[2, 1],  # XY
+    A[1, 2],  # YX (true = 0)
+    A[1, 1],  # AX
+    A[2, 2]   # AY
+  )
+)
+
+# build RMSE data frame
+rmse_df <- results_sim1 %>%
+
+  # only occasions with lagged parameters
+  filter(occasion >= 2) %>%
+
+  # reshape estimates to long format
+  pivot_longer(
+    cols = matches("^est(XY|YX|A|AY)_"),
+    names_to  = "param",
+    values_to = "estimate"
+  ) %>%
+
+  # drop failed fits
+  filter(!is.na(estimate)) %>%
+
+  # identify estimand type and method
+  mutate(
+    estimand = case_when(
+      str_detect(param, "^estXY_") ~ "XY",
+      str_detect(param, "^estYX_") ~ "YX",
+      str_detect(param, "^estA_")  ~ "AX",
+      str_detect(param, "^estAY_") ~ "AY"
+    ),
+
+    method = param %>%
+      str_remove("^est(XY|YX|A|AY)_") %>%
+      recode(
+        CLPM      = "CLPM",
+        CLPM_Adj  = "True model",
+        CLPM_LBCA = "CLPM linear BCA",
+        DPM       = "DPM",
+        RI_CLPM   = "RI-CLPM"
+      )
+  ) %>%
+
+  # attach true parameter values
+  left_join(true_params, by = "estimand") %>%
+
+  # compute RMSE and Monte Carlo SE
+  group_by(scenario, occasion, estimand, method) %>%
+  reframe(
+    nsim = n(),
+
+    # RMSE
+    rmse = sqrt(mean((estimate - true)^2)),
+
+    # Monte Carlo SE of RMSE
+    mcse_rmse =
+      sqrt(
+        sum(
+          ((estimate - true)^2 - mean((estimate - true)^2))^2
+        ) /
+        (nsim * (nsim - 1))
+      ) / (2 * rmse)
+  ) %>%
+
+  # clean factor ordering
+  mutate(
+    scenario = factor(scenario, levels = c("constant", "stepwise")),
+    method   = factor(
+      method,
+      levels = c(
+        "CLPM",
+        "True model",
+        "CLPM linear BCA",
+        "DPM",
+        "RI-CLPM"
+      )
+    )
+  )
+
+#####################################################
+# Colour palette for methods (shared across plots)
+#####################################################
+
+pal_method <- viridis(
+  n = nlevels(rmse_df$method),
+  option = "viridis",
+  begin  = 0.1,
+  end    = 0.9
+)
+names(pal_method) <- levels(rmse_df$method)
+
+#####################################################
+# Plot 1: cross-lagged effect of X on Y (XY)
+#####################################################
+
+plot_rmse_XY <- rmse_df %>%
+  filter(estimand == "XY") %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = rmse,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = rmse - mcse_rmse,
+      ymax = rmse + mcse_rmse
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(
+    x = "Occasion",
+    y = "RMSE",
+    color = NULL
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Plot 2: cross-lagged effect of Y on X (YX)
+#####################################################
+
+plot_rmse_YX <- rmse_df %>%
+  filter(estimand == "YX") %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = rmse,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = rmse - mcse_rmse,
+      ymax = rmse + mcse_rmse
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(
+    x = "Occasion",
+    y = "RMSE",
+    color = NULL
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Plot 3: autoregressive effect of X on X (AX)
+#####################################################
+
+plot_rmse_AX <- rmse_df %>%
+  filter(estimand == "AX") %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = rmse,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = rmse - mcse_rmse,
+      ymax = rmse + mcse_rmse
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(
+    x = "Occasion",
+    y = "RMSE",
+    color = NULL
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Plot 4: autoregressive effect of Y on Y (AY)
+#####################################################
+
+plot_rmse_AY <- rmse_df %>%
+  filter(estimand == "AY") %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = rmse,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = rmse - mcse_rmse,
+      ymax = rmse + mcse_rmse
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(
+    x = "Occasion",
+    y = "RMSE",
+    color = NULL
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Display all plots
+#####################################################
+
+plot_rmse_XY
+plot_rmse_YX
+plot_rmse_AX
+plot_rmse_AY
+
+```
+
+### Plot 3: Empirical SE Simulation Study 1
+
+These plots show the empirical standard error of the estimated parameters across occasions in Simulation Study 1. The empirical SE reflects the variability of the estimates across simulation runs and captures sampling uncertainty independent of bias.
+
+```{r Empirical SE plots}
+
+#####################################################
+# Build empirical SE data for all lagged parameters
+#####################################################
+
+# build empirical SE data frame
+empse_df <- results_sim1 %>%
+
+  # only occasions with lagged parameters
+  filter(occasion >= 2) %>%
+
+  # reshape estimates to long format
+  pivot_longer(
+    cols = matches("^est(XY|YX|A|AY)_"),
+    names_to  = "param",
+    values_to = "estimate"
+  ) %>%
+
+  # drop failed fits
+  filter(!is.na(estimate)) %>%
+
+  # identify estimand type and method
+  mutate(
+    estimand = case_when(
+      str_detect(param, "^estXY_") ~ "XY",
+      str_detect(param, "^estYX_") ~ "YX",
+      str_detect(param, "^estA_")  ~ "AX",
+      str_detect(param, "^estAY_") ~ "AY"
+    ),
+
+    method = param %>%
+      str_remove("^est(XY|YX|A|AY)_") %>%
+      recode(
+        CLPM      = "CLPM",
+        CLPM_Adj  = "True model",
+        CLPM_LBCA = "CLPM linear BCA",
+        DPM       = "DPM",
+        RI_CLPM   = "RI-CLPM"
+      )
+  ) %>%
+
+  # compute empirical SE and Monte Carlo SE
+  group_by(scenario, occasion, estimand, method) %>%
+  reframe(
+    nsim = n(),
+
+    # empirical standard error
+    emp_se = sd(estimate),
+
+    # Monte Carlo SE of empirical SE
+    mcse_emp_se =
+      emp_se / sqrt(2 * (nsim - 1))
+  ) %>%
+
+  # clean factor ordering
+  mutate(
+    scenario = factor(scenario, levels = c("constant", "stepwise")),
+    method   = factor(
+      method,
+      levels = c(
+        "CLPM",
+        "True model",
+        "CLPM linear BCA",
+        "DPM",
+        "RI-CLPM"
+      )
+    )
+  )
+
+#####################################################
+# Colour palette for methods (shared across plots)
+#####################################################
+
+pal_method <- qualitative_hcl(
+  n = nlevels(empse_df$method),
+  palette = "Set 2"
+)
+names(pal_method) <- levels(empse_df$method)
+
+#####################################################
+# Plot 1: cross-lagged effect of X on Y (XY)
+#####################################################
+
+plot_empse_XY <- empse_df %>%
+  filter(estimand == "XY") %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = emp_se,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = emp_se - mcse_emp_se,
+      ymax = emp_se + mcse_emp_se
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(
+    x = "Occasion",
+    y = "Empirical SE",
+    color = NULL
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Plot 2: cross-lagged effect of Y on X (YX)
+#####################################################
+
+plot_empse_YX <- empse_df %>%
+  filter(estimand == "YX") %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = emp_se,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = emp_se - mcse_emp_se,
+      ymax = emp_se + mcse_emp_se
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(
+    x = "Occasion",
+    y = "Empirical SE",
+    color = NULL
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Plot 3: autoregressive effect of X on X (AX)
+#####################################################
+
+plot_empse_AX <- empse_df %>%
+  filter(estimand == "AX") %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = emp_se,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = emp_se - mcse_emp_se,
+      ymax = emp_se + mcse_emp_se
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(
+    x = "Occasion",
+    y = "Empirical SE",
+    color = NULL
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Plot 4: autoregressive effect of Y on Y (AY)
+#####################################################
+
+plot_empse_AY <- empse_df %>%
+  filter(estimand == "AY") %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = emp_se,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = emp_se - mcse_emp_se,
+      ymax = emp_se + mcse_emp_se
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(
+    x = "Occasion",
+    y = "Empirical SE",
+    color = NULL
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Display all plots
+#####################################################
+
+plot_empse_XY
+plot_empse_YX
+plot_empse_AX
+plot_empse_AY
+
+```
+
+### Plot 4.1 : Coverage Simulation Study 1
+
+These plots show the coverage of the nominal 95% confidence intervals across occasions in Simulation Study 1. Coverage represents the proportion of simulation runs in which the true parameter value falls within the estimated confidence interval, indicating how well uncertainty is quantified by each method
+
+```{r Coverage plots}
+
+#####################################################
+# Build coverage data for all lagged parameters
+#####################################################
+
+# true parameters from the data-generating model
+true_params <- tibble(
+  estimand = c("XY", "YX", "AX", "AY"),
+  true     = c(
+    A[2, 1],  # XY
+    A[1, 2],  # YX
+    A[1, 1],  # AX
+    A[2, 2]   # AY
+  )
+)
+
+# --- estimates ---
+est_df <- results_sim1 %>%
+
+  # only occasions with lagged parameters
+  filter(occasion >= 2) %>%
+
+  pivot_longer(
+    cols = matches("^est(XY|YX|A|AY)_"),
+    names_to  = "param",
+    values_to = "estimate"
+  ) %>%
+
+  filter(!is.na(estimate)) %>%
+
+  mutate(
+    estimand = case_when(
+      str_detect(param, "^estXY_") ~ "XY",
+      str_detect(param, "^estYX_") ~ "YX",
+      str_detect(param, "^estA_")  ~ "AX",
+      str_detect(param, "^estAY_") ~ "AY"
+    ),
+    method = param %>%
+      str_remove("^est(XY|YX|A|AY)_") %>%
+      recode(
+        CLPM      = "CLPM",
+        CLPM_Adj  = "True model",
+        CLPM_LBCA = "CLPM linear BCA",
+        DPM       = "DPM",
+        RI_CLPM   = "RI-CLPM"
+      )
+  ) %>%
+  select(run, occasion, scenario, estimand, method, estimate)
+
+# --- CI lower bounds ---
+ciL_df <- results_sim1 %>%
+  filter(occasion >= 2) %>%
+
+  pivot_longer(
+    cols = matches("^ciL_(XY|YX|A|AY)_"),
+    names_to  = "param",
+    values_to = "ciL"
+  ) %>%
+
+  mutate(
+    estimand = case_when(
+      str_detect(param, "^ciL_XY_") ~ "XY",
+      str_detect(param, "^ciL_YX_") ~ "YX",
+      str_detect(param, "^ciL_A_")  ~ "AX",
+      str_detect(param, "^ciL_AY_") ~ "AY"
+    ),
+    method = param %>%
+      str_remove("^ciL_(XY|YX|A|AY)_") %>%
+      recode(
+        CLPM      = "CLPM",
+        CLPM_Adj  = "True model",
+        CLPM_LBCA = "CLPM linear BCA",
+        DPM       = "DPM",
+        RI_CLPM   = "RI-CLPM"
+      )
+  ) %>%
+  select(run, occasion, scenario, estimand, method, ciL)
+
+# --- CI upper bounds ---
+ciU_df <- results_sim1 %>%
+  filter(occasion >= 2) %>%
+
+  pivot_longer(
+    cols = matches("^ciU_(XY|YX|A|AY)_"),
+    names_to  = "param",
+    values_to = "ciU"
+  ) %>%
+
+  mutate(
+    estimand = case_when(
+      str_detect(param, "^ciU_XY_") ~ "XY",
+      str_detect(param, "^ciU_YX_") ~ "YX",
+      str_detect(param, "^ciU_A_")  ~ "AX",
+      str_detect(param, "^ciU_AY_") ~ "AY"
+    ),
+    method = param %>%
+      str_remove("^ciU_(XY|YX|A|AY)_") %>%
+      recode(
+        CLPM      = "CLPM",
+        CLPM_Adj  = "True model",
+        CLPM_LBCA = "CLPM linear BCA",
+        DPM       = "DPM",
+        RI_CLPM   = "RI-CLPM"
+      )
+  ) %>%
+  select(run, occasion, scenario, estimand, method, ciU)
+
+# --- combine everything ---
+coverage_df <- est_df %>%
+  left_join(ciL_df, by = c("run","occasion","scenario","estimand","method")) %>%
+  left_join(ciU_df, by = c("run","occasion","scenario","estimand","method")) %>%
+  left_join(true_params, by = "estimand") %>%
+
+  filter(!is.na(ciL), !is.na(ciU)) %>%
+
+  mutate(
+    covered = (ciL <= true & true <= ciU)
+  ) %>%
+
+  group_by(scenario, occasion, estimand, method) %>%
+  reframe(
+    nsim = n(),
+    coverage = mean(covered),
+    mcse_coverage = sqrt(coverage * (1 - coverage) / nsim)
+  ) %>%
+
+  mutate(
+    scenario = factor(scenario, levels = c("constant", "stepwise")),
+    method   = factor(
+      method,
+      levels = c(
+        "CLPM",
+        "True model",
+        "CLPM linear BCA",
+        "DPM",
+        "RI-CLPM"
+      )
+    )
+  )
+
+#####################################################
+# Colour palette for methods
+#####################################################
+
+pal_method <- qualitative_hcl(
+  n = nlevels(coverage_df$method),
+  palette = "Set 2"
+)
+names(pal_method) <- levels(coverage_df$method)
+
+#####################################################
+# Plot helper
+#####################################################
+
+plot_coverage <- function(df, estimand_label) {
+  df %>%
+    filter(estimand == estimand_label) %>%
+    ggplot(aes(
+      x = occasion,
+      y = coverage,
+      color = method,
+      group = method
+    )) +
+    geom_line(linewidth = 0.9) +
+    geom_point(size = 2) +
+    geom_errorbar(
+      aes(
+        ymin = coverage - mcse_coverage,
+        ymax = coverage + mcse_coverage
+      ),
+      width = 0.15,
+      linewidth = 0.4
+    ) +
+    geom_hline(yintercept = 0.95, linetype = "dashed", linewidth = 0.4) +
+    ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+    scale_color_manual(values = pal_method) +
+    labs(
+      x = "Occasion",
+      y = "Coverage",
+      color = NULL
+    ) +
+    theme_classic(base_size = 13) +
+    theme(
+      panel.spacing.x = unit(1.2, "cm"),
+      strip.text      = element_text(size = 14),
+      axis.title      = element_text(size = 13),
+      axis.text       = element_text(size = 12),
+      legend.position = "bottom",
+      legend.text     = element_text(size = 12)
+    )
+}
+
+#####################################################
+# Build and display all four plots
+#####################################################
+
+plot_cov_XY <- plot_coverage(coverage_df, "XY")
+plot_cov_YX <- plot_coverage(coverage_df, "YX")
+plot_cov_AX <- plot_coverage(coverage_df, "AX")
+plot_cov_AY <- plot_coverage(coverage_df, "AY")
+
+plot_cov_XY
+plot_cov_YX
+plot_cov_AX
+plot_cov_AY
+
+```
+
+### plot 4.2: type 1 error Simulation Study 1
+
+These plots show the Type I error rates for the null-true parameters in Simulation Study 1. Type I error is the proportion of simulation runs in which a true null hypothesis is incorrectly rejected, indicating how well each method controls false positives over time. 
+
+```{r Type 1 error plots}
+
+#####################################################
+# Build type I error data for all lagged parameters
+#####################################################
+
+# true parameters from the data-generating model
+true_params <- tibble(
+  estimand = c("XY", "YX", "AX", "AY"),
+  true     = c(
+    A[2, 1],  # XY
+    A[1, 2],  # YX (typically 0)
+    A[1, 1],  # AX
+    A[2, 2]   # AY
+  )
+)
+
+# --- p-values ---
+pval_df <- results_sim1 %>%
+
+  # only occasions with lagged parameters
+  filter(occasion >= 2) %>%
+
+  # reshape p-values to long format
+  pivot_longer(
+    cols = matches("^p(XY|YX|A|AY)_"),
+    names_to  = "param",
+    values_to = "pval"
+  ) %>%
+
+  # drop failed fits
+  filter(!is.na(pval)) %>%
+
+  # identify estimand type and method
+  mutate(
+    estimand = case_when(
+      str_detect(param, "^pXY_") ~ "XY",
+      str_detect(param, "^pYX_") ~ "YX",
+      str_detect(param, "^pA_")  ~ "AX",
+      str_detect(param, "^pAY_") ~ "AY"
+    ),
+
+    method = param %>%
+      str_remove("^p(XY|YX|A|AY)_") %>%
+      recode(
+        CLPM      = "CLPM",
+        CLPM_Adj  = "True model",
+        CLPM_LBCA = "CLPM linear BCA",
+        DPM       = "DPM",
+        RI_CLPM   = "RI-CLPM"
+      )
+  ) %>%
+  select(run, occasion, scenario, estimand, method, pval)
+
+# build type I error data frame
+type1_df <- pval_df %>%
+
+  # attach true parameter values
+  left_join(true_params, by = "estimand") %>%
+
+  # only estimands where the null is true (theta = 0)
+  filter(true == 0) %>%
+
+  # indicator: reject at alpha
+  mutate(
+    reject = (pval <= 0.05)
+  ) %>%
+
+  # type I error rate and Monte Carlo SE
+  group_by(scenario, occasion, estimand, method) %>%
+  reframe(
+    nsim = n(),
+
+    # type I error rate
+    type1 = mean(reject),
+
+    # Monte Carlo SE of type I error rate
+    mcse_type1 =
+      sqrt(type1 * (1 - type1) / nsim)
+  ) %>%
+
+  # clean factor ordering
+  mutate(
+    scenario = factor(scenario, levels = c("constant", "stepwise")),
+    method   = factor(
+      method,
+      levels = c(
+        "CLPM",
+        "True model",
+        "CLPM linear BCA",
+        "DPM",
+        "RI-CLPM"
+      )
+    )
+  )
+
+#####################################################
+# Colour palette for methods (shared across plots)
+#####################################################
+
+pal_method <- qualitative_hcl(
+  n = nlevels(type1_df$method),
+  palette = "Set 2"
+)
+names(pal_method) <- levels(type1_df$method)
+
+#####################################################
+# Plot: type I error (only for null-true estimands)
+#####################################################
+
+plot_type1 <- type1_df %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = type1,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = type1 - mcse_type1,
+      ymax = type1 + mcse_type1
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+
+  # nominal alpha reference line
+  geom_hline(yintercept = 0.05, linetype = "dashed", linewidth = 0.4) +
+
+  # facet by scenario
+  ggh4x::facet_wrap2(
+    ~ scenario,
+    nrow = 1,
+    axes = "y"
+  ) +
+
+  # colours
+  scale_color_manual(values = pal_method) +
+
+  # labels
+  labs(
+    x = "Occasion",
+    y = "Type I error",
+    color = NULL
+  ) +
+
+  # scientific theme
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Display plot
+#####################################################
+
+plot_type1
+
+```
+
+### Ploit 4.3: Power (type 2 error) Simulation Study 1
+
+These plots show the statistical power for the non-null parameters in Simulation Study 1. Power is the proportion of simulation runs in which a false null hypothesis is correctly rejected, and reflects how well each method detects true effects over time.
+
+```{r Power plots}
+
+#####################################################
+# Build power data for all lagged parameters
+#####################################################
+
+# true parameters from the data-generating model
+true_params <- tibble(
+  estimand = c("XY", "YX", "AX", "AY"),
+  true     = c(
+    A[2, 1],  # XY
+    A[1, 2],  # YX (usually 0)
+    A[1, 1],  # AX
+    A[2, 2]   # AY
+  )
+)
+
+# --- p-values ---
+pval_df <- results_sim1 %>%
+
+  # only occasions with lagged parameters
+  filter(occasion >= 2) %>%
+
+  # reshape p-values to long format
+  pivot_longer(
+    cols = matches("^p(XY|YX|A|AY)_"),
+    names_to  = "param",
+    values_to = "pval"
+  ) %>%
+
+  # drop failed fits
+  filter(!is.na(pval)) %>%
+
+  # identify estimand type and method
+  mutate(
+    estimand = case_when(
+      str_detect(param, "^pXY_") ~ "XY",
+      str_detect(param, "^pYX_") ~ "YX",
+      str_detect(param, "^pA_")  ~ "AX",
+      str_detect(param, "^pAY_") ~ "AY"
+    ),
+
+    method = param %>%
+      str_remove("^p(XY|YX|A|AY)_") %>%
+      recode(
+        CLPM      = "CLPM",
+        CLPM_Adj  = "True model",
+        CLPM_LBCA = "CLPM linear BCA",
+        DPM       = "DPM",
+        RI_CLPM   = "RI-CLPM"
+      )
+  ) %>%
+  select(run, occasion, scenario, estimand, method, pval)
+
+# build power data frame
+power_df <- pval_df %>%
+
+  # attach true parameter values
+  left_join(true_params, by = "estimand") %>%
+
+  # only estimands where the null is false
+  filter(true != 0) %>%
+
+  # indicator: reject at alpha
+  mutate(
+    reject = (pval <= 0.05)
+  ) %>%
+
+  # power and Monte Carlo SE
+  group_by(scenario, occasion, estimand, method) %>%
+  reframe(
+    nsim = n(),
+
+    # power
+    power = mean(reject),
+
+    # Monte Carlo SE of power
+    mcse_power =
+      sqrt(power * (1 - power) / nsim)
+  ) %>%
+
+  # clean factor ordering
+  mutate(
+    scenario = factor(scenario, levels = c("constant", "stepwise")),
+    method   = factor(
+      method,
+      levels = c(
+        "CLPM",
+        "True model",
+        "CLPM linear BCA",
+        "DPM",
+        "RI-CLPM"
+      )
+    )
+  )
+
+#####################################################
+# Colour palette for methods (shared across plots)
+#####################################################
+
+pal_method <- qualitative_hcl(
+  n = nlevels(power_df$method),
+  palette = "Set 2"
+)
+names(pal_method) <- levels(power_df$method)
+
+#####################################################
+# Plot helper (used for all three estimands)
+#####################################################
+
+plot_power <- function(df, estimand_label) {
+
+  df %>%
+    filter(estimand == estimand_label) %>%
+
+    ggplot(aes(
+      x     = occasion,
+      y     = power,
+      color = method,
+      group = method
+    )) +
+    geom_line(linewidth = 0.9) +
+    geom_point(size = 2) +
+    geom_errorbar(
+      aes(
+        ymin = power - mcse_power,
+        ymax = power + mcse_power
+      ),
+      width = 0.15,
+      linewidth = 0.4
+    ) +
+
+    # reference line for high power
+    geom_hline(yintercept = 0.80, linetype = "dashed", linewidth = 0.4) +
+
+    # facet by scenario
+    ggh4x::facet_wrap2(
+      ~ scenario,
+      nrow = 1,
+      axes = "y"
+    ) +
+
+    # colours
+    scale_color_manual(values = pal_method) +
+
+    # labels
+    labs(
+      x = "Occasion",
+      y = "Power",
+      color = NULL
+    ) +
+
+    # scientific theme
+    theme_classic(base_size = 13) +
+    theme(
+      panel.spacing.x = unit(1.2, "cm"),
+      strip.text      = element_text(size = 14),
+      axis.title      = element_text(size = 13),
+      axis.text       = element_text(size = 12),
+      legend.position = "bottom",
+      legend.text     = element_text(size = 12)
+    )
+}
+
+#####################################################
+# Build and display all three power plots
+#####################################################
+
+plot_power_XY <- plot_power(power_df, "XY")
+plot_power_AX <- plot_power(power_df, "AX")
+plot_power_AY <- plot_power(power_df, "AY")
+
+plot_power_XY
+plot_power_AX
+plot_power_AY
+
+```
+
+concatenate these results into a single object for later use
+
+```{r}
+library(patchwork)
+
+# create legendless plots
+plot_relbias_XY_noleg <- plot_relbias_XY +
+  theme(legend.position = "none")
+
+# combine the two
+combined_XY <- plot_relbias_XY_noleg / plot_rmse_XY
+
+ggsave(
+  filename = "combined_XY_relbias_RMSE_1.png",
+  plot     = combined_XY,
+  path     = "C:/Users/Admin/Desktop",
+  width    = 10,
+  height   = 8,
+  dpi      = 300
+)
+
+```
+
+# Simulation Study 2 Results
+
+```{r}
+
+# load the function and dependencies
+source("Thesis\\Code\\Qmd_Rmd_R_Pyth\\Sim Studies\\Sim_Study_2_RR_no_sampling.R")
+
+# set a seed for reproducibility
+set.seed(183718)
+
+# autoregressive + cross-lag structure
+A <- matrix(c(
+  0.20, 0,                         # autoregressive and cross-lag for Y
+  0.10, 0.20                       # cross-lag and autoregressive for X
+), nrow = 2, byrow = TRUE)
+
+# confounder covariance (3 confounders)
+Psi <- diag(3)                     # uncorrelated confounders with var=1
+
+# sample B1 matrix
+B1 <- sample_B1(
+  k = 3,
+  R2_1 = 0.15,
+  eta_1 = 0.50,
+  min_abs = 0.001,
+  max_abs = 0.40
+)
+
+# for the constant scenario, replicate B1 across time points
+B_constant <- lapply(1:5, function(t) B1)
+
+# scaling factor such that R_2 becomes twice as large: scaling factor = sqrt(old R2 / new R2)
+scale_factor <- sqrt(0.40 / 0.15)              # = 1.414214
+                                  
+# create beta list for increasing R2 scenario
+B_high <- B1 * scale_factor
+
+# fill the list
+B_stepwise <- list(
+  t1 = B1,
+  t2 = B1,
+  t3 = B1,
+  t4 = B_high,
+  t5 = B_high
+)
+
+# call the simulation function
+results_sim2 <- run_simulation_study2(
+  reps          = 1000,                                # replications
+  N             = 1000,                                # sample size
+  T             = 5,                                   # number of time points
+  k             = 3,                                   # number of linear confounders
+  scenarios     = c("constant", "stepwise"),           # B scenarios
+  B_scenarios   = list(                                # beta trajectories
+    constant = B_constant,
+    stepwise = B_stepwise
+  ),
+  A             = A,                                   # AR + cross-lag matrix
+  Psi           = Psi,                                 # confounder covariance matrix
+  rho_extra     = 0.1,                                 # extra residual correlation
+  models_to_run = c(                                   # models to run
+    "clpm",
+    "riclpm",
+    "dpm",
+    "adj",
+    "lbca",
+    "xgb",
+    "true"
+  ),
+  cores         = 6,                                   # parallel cores
+  base_seed     = 12345                                # base seed
+)
+
+```
+
+### Plot 0.1: Beta trajectory plots Simulation Study 2
+
+```{r}
+
+# libraries
+library(tidyverse)
+library(ggh4x)
+library(colorspace)
+
+# first load the data
+df2 <- results_sim2
+
+# how many runs were not successful?
+sum(df2$is_na_run)
+
+# custom colour palette (scientific, colorblind-friendly)
+pal_beta <- qualitative_hcl(
+  n = ncol(B1),
+  palette = "Set 2"
+)
+
+# number of occasions
+T <- length(B_stepwise)
+
+# confounder names
+conf_names <- colnames(B1)
+
+# identify linear vs non-linear terms
+term_type <- tibble(
+  term = conf_names,
+  type = if_else(str_detect(term, ":"), "Non-linear", "Linear")
+)
+
+# colour palette (2 colours only)
+pal_beta <- qualitative_hcl(
+  n = 2,
+  palette = "Set 2"
+)
+names(pal_beta) <- c("Linear", "Non-linear")
+
+# build beta trajectory dataframe
+df_beta <- bind_rows(
+
+  # constant scenario
+  lapply(1:T, function(t) {
+    tibble(
+      occasion = t,
+      term     = conf_names,
+      beta_X   = B_constant[[t]][1, ],
+      beta_Y   = B_constant[[t]][2, ],
+      scenario = "constant"
+    )
+  }),
+
+  # stepwise scenario
+  lapply(1:T, function(t) {
+    tibble(
+      occasion = t,
+      term     = conf_names,
+      beta_X   = B_stepwise[[t]][1, ],
+      beta_Y   = B_stepwise[[t]][2, ],
+      scenario = "stepwise"
+    )
+  })
+) %>%
+  left_join(term_type, by = "term") %>%
+  mutate(
+    scenario = factor(scenario, levels = c("constant", "stepwise")),
+    type     = factor(type, levels = c("Linear", "Non-linear"))
+  )
+
+plot_beta_X <- df_beta %>%
+  ggplot(aes(
+    x     = occasion,
+    y     = beta_X,
+    group = term,
+    color = type
+  )) +
+  geom_line(linewidth = 0.9, alpha = 0.9) +
+  ggh4x::facet_wrap2(
+    ~ scenario,
+    nrow = 1,
+    axes = "y"
+  ) +
+  scale_color_manual(values = pal_beta) +
+  labs(
+    x = "Occasion",
+    y = "Effect of confounders on X",
+    color = NULL
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+# same for Y
+plot_beta_Y <- df_beta %>%
+  ggplot(aes(
+    x     = occasion,
+    y     = beta_Y,
+    group = term,
+    color = type
+  )) +
+  geom_line(linewidth = 0.9, alpha = 0.9) +
+  ggh4x::facet_wrap2(
+    ~ scenario,
+    nrow = 1,
+    axes = "y"
+  ) +
+  scale_color_manual(values = pal_beta) +
+  labs(
+    x = "Occasion",
+    y = "Effect of confounders on Y",
+    color = NULL
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+# display the plots
+plot_beta_X
+plot_beta_Y
+
+```
+
+### Plot 0.2: Variance Explained Simulation Study 2
+
+```{r}
+
+# R-squared / variance explained trajectories
+# (since all vars have Var = 1, you said we can use beta^2)
+
+df_r2 <- df_beta %>%
+  mutate(
+    r2_X = beta_X^2,
+    r2_Y = beta_Y^2
+  )
+
+plot_r2_X <- df_r2 %>%
+  ggplot(aes(
+    x     = occasion,
+    y     = r2_X,
+    group = term,
+    color = type
+  )) +
+  geom_line(linewidth = 0.9, alpha = 0.9) +
+  ggh4x::facet_wrap2(
+    ~ scenario,
+    nrow = 1,
+    axes = "y"
+  ) +
+  scale_color_manual(values = pal_beta) +
+  labs(
+    x = "Occasion",
+    y = expression(R^2*" (variance explained) in X"),
+    color = NULL
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+plot_r2_Y <- df_r2 %>%
+  ggplot(aes(
+    x     = occasion,
+    y     = r2_Y,
+    group = term,
+    color = type
+  )) +
+  geom_line(linewidth = 0.9, alpha = 0.9) +
+  ggh4x::facet_wrap2(
+    ~ scenario,
+    nrow = 1,
+    axes = "y"
+  ) +
+  scale_color_manual(values = pal_beta) +
+  labs(
+    x = "Occasion",
+    y = expression(R^2*" (variance explained) in Y"),
+    color = NULL
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+# display
+plot_r2_X
+plot_r2_Y
+
+```
+
+### Plot 1: relative bias Simulation Study 2
+
+```{r}
+
+library(tidyverse)
+library(ggh4x)
+library(viridis)
+
+#####################################################
+# True parameters
+#####################################################
+
+true_params <- tibble(
+  estimand = c("XY", "YX", "AX", "AY"),
+  true     = c(
+    A[2, 1],  # XY
+    A[1, 2],  # YX
+    A[1, 1],  # AX
+    A[2, 2]   # AY
+  )
+)
+
+#####################################################
+# Build relative bias data for all lagged parameters
+#####################################################
+
+relbias_df <- results_sim2 %>%
+
+  # only occasions with lagged parameters
+  filter(occasion >= 2) %>%
+
+  # reshape estimates to long format
+  pivot_longer(
+    cols = matches("^est(XY|YX|A|AY)_"),
+    names_to  = "param",
+    values_to = "estimate"
+  ) %>%
+
+  # drop failed fits
+  filter(!is.na(estimate)) %>%
+
+  # identify estimand type and method
+  mutate(
+    estimand = case_when(
+      str_detect(param, "^estXY_") ~ "XY",
+      str_detect(param, "^estYX_") ~ "YX",
+      str_detect(param, "^estA_")  ~ "AX",
+      str_detect(param, "^estAY_") ~ "AY"
+    ),
+
+    method = param %>%
+      str_remove("^est(XY|YX|A|AY)_") %>%
+      recode(
+        CLPM      = "CLPM",
+        CLPM_Adj  = "Linear adj CLPM",
+        CLPM_LBCA = "CLPM linear BCA",
+        DPM       = "DPM",
+        RI_CLPM   = "RI-CLPM",
+        CLPM_XGB  = "CLPM XGB BCA"
+      )
+  ) %>%
+
+  # attach true parameter values
+  left_join(true_params, by = "estimand") %>%
+
+  # compute relative bias and Monte Carlo SE
+  group_by(scenario, occasion, estimand, method) %>%
+  reframe(
+    nsim = n(),
+    mean_est = mean(estimate),
+
+    # relative bias
+    rel_bias = (mean_est - true) / true,
+
+    # Monte Carlo SE of relative bias
+    mcse_rel_bias =
+      sqrt(
+        sum((estimate - mean_est)^2) /
+        (nsim * (nsim - 1))
+      ) / abs(true)
+  ) %>%
+
+  # clean factor ordering
+  mutate(
+    scenario = factor(scenario, levels = c("constant", "stepwise")),
+    method   = factor(
+      method,
+      levels = c(
+        "CLPM",
+        "Linear adj CLPM",
+        "CLPM linear BCA",
+        "CLPM XGB BCA",
+        "DPM",
+        "RI-CLPM"
+      )
+    )
+  )
+
+#####################################################
+# Colour palette for methods (shared across plots)
+#####################################################
+
+pal_method <- viridis(
+  n = nlevels(relbias_df$method),
+  option = "viridis",
+  begin  = 0.1,
+  end    = 0.9
+)
+names(pal_method) <- levels(relbias_df$method)
+
+#####################################################
+# Plot 1: cross-lagged effect of X on Y (XY)
+#####################################################
+
+plot_relbias_XY <- relbias_df %>%
+  filter(estimand == "XY") %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = rel_bias,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = rel_bias - mcse_rel_bias,
+      ymax = rel_bias + mcse_rel_bias
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.4) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(x = "Occasion", y = "Relative bias", color = NULL) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Plot 2: autoregressive effect of X on X (AX)
+#####################################################
+
+plot_relbias_AX <- relbias_df %>%
+  filter(estimand == "AX") %>%
+
+  ggplot(aes(occasion, rel_bias, color = method, group = method)) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = rel_bias - mcse_rel_bias,
+      ymax = rel_bias + mcse_rel_bias
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.4) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(x = "Occasion", y = "Relative bias", color = NULL) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    legend.position = "bottom"
+  )
+
+#####################################################
+# Plot 3: autoregressive effect of Y on Y (AY)
+#####################################################
+
+plot_relbias_AY <- relbias_df %>%
+  filter(estimand == "AY") %>%
+
+  ggplot(aes(occasion, rel_bias, color = method, group = method)) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = rel_bias - mcse_rel_bias,
+      ymax = rel_bias + mcse_rel_bias
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.4) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(x = "Occasion", y = "Relative bias", color = NULL) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    legend.position = "bottom"
+  )
+
+#####################################################
+# Display all plots
+#####################################################
+
+plot_relbias_XY
+plot_relbias_AX
+plot_relbias_AY
+
+```
+
+### Plot 1.2: Bias Simulation Study 2
+
+```{r}
+
+#####################################################
+# Build bias data for all lagged parameters
+#####################################################
+
+# true parameters from the data-generating model
+true_params <- tibble(
+  estimand = c("XY", "YX", "AX", "AY"),
+  true     = c(
+    A[2, 1],  # XY
+    A[1, 2],  # YX (true = 0)
+    A[1, 1],  # AX
+    A[2, 2]   # AY
+  )
+)
+
+# build bias data frame
+bias_df <- results_sim2 %>%
+
+  # only occasions with lagged parameters
+  filter(occasion >= 2) %>%
+
+  # reshape estimates to long format
+  pivot_longer(
+    cols = matches("^est(XY|YX|A|AY)_"),
+    names_to  = "param",
+    values_to = "estimate"
+  ) %>%
+
+  # drop failed fits
+  filter(!is.na(estimate)) %>%
+
+  # identify estimand type and method
+  mutate(
+    estimand = case_when(
+      str_detect(param, "^estXY_") ~ "XY",
+      str_detect(param, "^estYX_") ~ "YX",
+      str_detect(param, "^estA_")  ~ "AX",
+      str_detect(param, "^estAY_") ~ "AY"
+    ),
+
+    method = param %>%
+      str_remove("^est(XY|YX|A|AY)_") %>%
+      recode(
+        CLPM      = "CLPM",
+        CLPM_Adj  = "Lin adj",
+        CLPM_LBCA = "CLPM linear BCA",
+        DPM       = "DPM",
+        RI_CLPM   = "RI-CLPM",
+        CLPM_XGB  = "CLPM XGB"
+      )
+  ) %>%
+
+  # attach true parameter values
+  left_join(true_params, by = "estimand") %>%
+
+  # compute bias and Monte Carlo SE
+  group_by(scenario, occasion, estimand, method) %>%
+  reframe(
+    nsim = n(),
+
+    mean_est = mean(estimate),
+
+    # bias
+    bias = mean_est - true,
+
+    # Monte Carlo SE of the bias
+    mcse_bias =
+      sqrt(
+        sum((estimate - mean_est)^2) /
+        (nsim * (nsim - 1))
+      )
+  ) %>%
+
+  # clean factor ordering
+  mutate(
+    scenario = factor(scenario, levels = c("constant", "stepwise")),
+    method   = factor(
+      method,
+      levels = c(
+        "CLPM",
+        "Lin adj",
+        "CLPM linear BCA",
+        "CLPM XGB",
+        "DPM",
+        "RI-CLPM"
+      )
+    )
+  )
+
+#####################################################
+# Colour palette for methods (shared across plots)
+#####################################################
+
+pal_method <- qualitative_hcl(
+  n = nlevels(bias_df$method),
+  palette = "Set 2"
+)
+names(pal_method) <- levels(bias_df$method)
+
+#####################################################
+# Plot 1: cross-lagged effect of X on Y (XY)
+#####################################################
+
+plot_bias_XY <- bias_df %>%
+  filter(estimand == "XY") %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = bias,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = bias - mcse_bias,
+      ymax = bias + mcse_bias
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.4) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(
+    x = "Occasion",
+    y = "Bias",
+    color = NULL
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Plot 2: cross-lagged effect of Y on X (YX)
+#####################################################
+
+plot_bias_YX <- bias_df %>%
+  filter(estimand == "YX") %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = bias,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = bias - mcse_bias,
+      ymax = bias + mcse_bias
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.4) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(
+    x = "Occasion",
+    y = "Bias",
+    color = NULL
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Plot 3: autoregressive effect of X on X (AX)
+#####################################################
+
+plot_bias_AX <- bias_df %>%
+  filter(estimand == "AX") %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = bias,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = bias - mcse_bias,
+      ymax = bias + mcse_bias
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.4) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(
+    x = "Occasion",
+    y = "Bias",
+    color = NULL
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Plot 4: autoregressive effect of Y on Y (AY)
+#####################################################
+
+plot_bias_AY <- bias_df %>%
+  filter(estimand == "AY") %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = bias,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = bias - mcse_bias,
+      ymax = bias + mcse_bias
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  geom_hline(yintercept = 0, linetype = "dashed", linewidth = 0.4) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(
+    x = "Occasion",
+    y = "Bias",
+    color = NULL
+  ) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Display all plots
+#####################################################
+
+plot_bias_XY
+plot_bias_YX
+plot_bias_AX
+plot_bias_AY
+
+```
+
+### Plot 2: RMSE Simulation Study 2
+
+```{r}
+
+library(tidyverse)
+library(ggh4x)
+library(viridis)
+
+#####################################################
+# Build RMSE data for all lagged parameters
+#####################################################
+
+# true parameters from the data-generating model
+true_params <- tibble(
+  estimand = c("XY", "YX", "AX", "AY"),
+  true     = c(
+    A[2, 1],  # XY
+    A[1, 2],  # YX (true = 0)
+    A[1, 1],  # AX
+    A[2, 2]   # AY
+  )
+)
+
+# build RMSE data frame
+rmse_df <- results_sim2 %>%
+
+  # only occasions with lagged parameters
+  filter(occasion >= 2) %>%
+
+  # reshape estimates to long format
+  pivot_longer(
+    cols = matches("^est(XY|YX|A|AY)_"),
+    names_to  = "param",
+    values_to = "estimate"
+  ) %>%
+
+  # drop failed fits
+  filter(!is.na(estimate)) %>%
+
+  # identify estimand type and method
+  mutate(
+    estimand = case_when(
+      str_detect(param, "^estXY_") ~ "XY",
+      str_detect(param, "^estYX_") ~ "YX",
+      str_detect(param, "^estA_")  ~ "AX",
+      str_detect(param, "^estAY_") ~ "AY"
+    ),
+
+    method = param %>%
+      str_remove("^est(XY|YX|A|AY)_") %>%
+      recode(
+        CLPM      = "CLPM",
+        CLPM_Adj  = "Lin adj",
+        CLPM_LBCA = "CLPM linear BCA",
+        CLPM_XGB  = "CLPM XGB BCA",
+        DPM       = "DPM",
+        RI_CLPM   = "RI-CLPM"
+      )
+  ) %>%
+
+  # attach true parameter values
+  left_join(true_params, by = "estimand") %>%
+
+  # compute RMSE and Monte Carlo SE
+  group_by(scenario, occasion, estimand, method) %>%
+  reframe(
+    nsim = n(),
+
+    # RMSE
+    rmse = sqrt(mean((estimate - true)^2)),
+
+    # Monte Carlo SE of RMSE
+    mcse_rmse =
+      sqrt(
+        sum(
+          ((estimate - true)^2 - mean((estimate - true)^2))^2
+        ) /
+        (nsim * (nsim - 1))
+      ) / (2 * rmse)
+  ) %>%
+
+  # clean factor ordering
+  mutate(
+    scenario = factor(scenario, levels = c("constant", "stepwise")),
+    method   = factor(
+      method,
+      levels = c(
+        "CLPM",
+        "Lin adj",
+        "CLPM linear BCA",
+        "CLPM XGB BCA",
+        "DPM",
+        "RI-CLPM"
+      )
+    )
+  )
+
+#####################################################
+# Colour palette for methods (shared across plots)
+#####################################################
+
+pal_method <- viridis(
+  n = nlevels(rmse_df$method),
+  option = "viridis",
+  begin  = 0.1,
+  end    = 0.9
+)
+names(pal_method) <- levels(rmse_df$method)
+
+#####################################################
+# Plot 1: cross-lagged effect of X on Y (XY)
+#####################################################
+
+plot_rmse_XY <- rmse_df %>%
+  filter(estimand == "XY") %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = rmse,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = rmse - mcse_rmse,
+      ymax = rmse + mcse_rmse
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(x = "Occasion", y = "RMSE", color = NULL) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Plot 2: cross-lagged effect of Y on X (YX)
+#####################################################
+
+plot_rmse_YX <- rmse_df %>%
+  filter(estimand == "YX") %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = rmse,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = rmse - mcse_rmse,
+      ymax = rmse + mcse_rmse
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(x = "Occasion", y = "RMSE", color = NULL) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Plot 3: autoregressive effect of X on X (AX)
+#####################################################
+
+plot_rmse_AX <- rmse_df %>%
+  filter(estimand == "AX") %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = rmse,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = rmse - mcse_rmse,
+      ymax = rmse + mcse_rmse
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(x = "Occasion", y = "RMSE", color = NULL) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Plot 4: autoregressive effect of Y on Y (AY)
+#####################################################
+
+plot_rmse_AY <- rmse_df %>%
+  filter(estimand == "AY") %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = rmse,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = rmse - mcse_rmse,
+      ymax = rmse + mcse_rmse
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+  ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+  scale_color_manual(values = pal_method) +
+  labs(x = "Occasion", y = "RMSE", color = NULL) +
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Display all plots
+#####################################################
+
+plot_rmse_XY
+plot_rmse_YX
+plot_rmse_AX
+plot_rmse_AY
+
+```
+
+### Plot 4.1: Coverage Simulation Study 2
+
+
+```{r}
+
+#####################################################
+# Build coverage data for all lagged parameters
+#####################################################
+
+# true parameters from the data-generating model
+true_params <- tibble(
+  estimand = c("XY", "YX", "AX", "AY"),
+  true     = c(
+    A[2, 1],  # XY
+    A[1, 2],  # YX
+    A[1, 1],  # AX
+    A[2, 2]   # AY
+  )
+)
+
+#####################################################
+# --- estimates ---
+#####################################################
+
+est_df <- results_sim2 %>%
+
+  # only occasions with lagged parameters
+  filter(occasion >= 2) %>%
+
+  pivot_longer(
+    cols = matches("^est(XY|YX|A|AY)_"),
+    names_to  = "param",
+    values_to = "estimate"
+  ) %>%
+
+  filter(!is.na(estimate)) %>%
+
+  mutate(
+    estimand = case_when(
+      str_detect(param, "^estXY_") ~ "XY",
+      str_detect(param, "^estYX_") ~ "YX",
+      str_detect(param, "^estA_")  ~ "AX",
+      str_detect(param, "^estAY_") ~ "AY"
+    ),
+    method = param %>%
+      str_remove("^est(XY|YX|A|AY)_") %>%
+      recode(
+        CLPM      = "CLPM",
+        CLPM_Adj  = "Lin adj",
+        CLPM_LBCA = "CLPM linear BCA",
+        CLPM_XGB  = "CLPM XGB BCA",
+        DPM       = "DPM",
+        RI_CLPM   = "RI-CLPM"
+      )
+  ) %>%
+  select(run, occasion, scenario, estimand, method, estimate)
+
+#####################################################
+# --- CI lower bounds ---
+#####################################################
+
+ciL_df <- results_sim2 %>%
+  filter(occasion >= 2) %>%
+
+  pivot_longer(
+    cols = matches("^ciL_(XY|YX|A|AY)_"),
+    names_to  = "param",
+    values_to = "ciL"
+  ) %>%
+
+  mutate(
+    estimand = case_when(
+      str_detect(param, "^ciL_XY_") ~ "XY",
+      str_detect(param, "^ciL_YX_") ~ "YX",
+      str_detect(param, "^ciL_A_")  ~ "AX",
+      str_detect(param, "^ciL_AY_") ~ "AY"
+    ),
+    method = param %>%
+      str_remove("^ciL_(XY|YX|A|AY)_") %>%
+      recode(
+        CLPM      = "CLPM",
+        CLPM_Adj  = "Lin adj",
+        CLPM_LBCA = "CLPM linear BCA",
+        CLPM_XGB  = "CLPM XGB BCA",
+        DPM       = "DPM",
+        RI_CLPM   = "RI-CLPM"
+      )
+  ) %>%
+  select(run, occasion, scenario, estimand, method, ciL)
+
+#####################################################
+# --- CI upper bounds ---
+#####################################################
+
+ciU_df <- results_sim2 %>%
+  filter(occasion >= 2) %>%
+
+  pivot_longer(
+    cols = matches("^ciU_(XY|YX|A|AY)_"),
+    names_to  = "param",
+    values_to = "ciU"
+  ) %>%
+
+  mutate(
+    estimand = case_when(
+      str_detect(param, "^ciU_XY_") ~ "XY",
+      str_detect(param, "^ciU_YX_") ~ "YX",
+      str_detect(param, "^ciU_A_")  ~ "AX",
+      str_detect(param, "^ciU_AY_") ~ "AY"
+    ),
+    method = param %>%
+      str_remove("^ciU_(XY|YX|A|AY)_") %>%
+      recode(
+        CLPM      = "CLPM",
+        CLPM_Adj  = "Lin adj",
+        CLPM_LBCA = "CLPM linear BCA",
+        CLPM_XGB  = "CLPM XGB BCA",
+        DPM       = "DPM",
+        RI_CLPM   = "RI-CLPM"
+      )
+  ) %>%
+  select(run, occasion, scenario, estimand, method, ciU)
+
+#####################################################
+# --- combine everything ---
+#####################################################
+
+coverage_df <- est_df %>%
+  left_join(ciL_df, by = c("run","occasion","scenario","estimand","method")) %>%
+  left_join(ciU_df, by = c("run","occasion","scenario","estimand","method")) %>%
+  left_join(true_params, by = "estimand") %>%
+
+  filter(!is.na(ciL), !is.na(ciU)) %>%
+
+  mutate(
+    covered = (ciL <= true & true <= ciU)
+  ) %>%
+
+  group_by(scenario, occasion, estimand, method) %>%
+  reframe(
+    nsim = n(),
+    coverage = mean(covered),
+    mcse_coverage = sqrt(coverage * (1 - coverage) / nsim)
+  ) %>%
+
+  mutate(
+    scenario = factor(scenario, levels = c("constant", "stepwise")),
+    method   = factor(
+      method,
+      levels = c(
+        "CLPM",
+        "Lin adj",
+        "CLPM linear BCA",
+        "CLPM XGB BCA",
+        "DPM",
+        "RI-CLPM"
+      )
+    )
+  )
+
+#####################################################
+# Colour palette for methods
+#####################################################
+
+pal_method <- qualitative_hcl(
+  n = nlevels(coverage_df$method),
+  palette = "Set 2"
+)
+names(pal_method) <- levels(coverage_df$method)
+
+#####################################################
+# Plot helper
+#####################################################
+
+plot_coverage <- function(df, estimand_label) {
+  df %>%
+    filter(estimand == estimand_label) %>%
+    ggplot(aes(
+      x = occasion,
+      y = coverage,
+      color = method,
+      group = method
+    )) +
+    geom_line(linewidth = 0.9) +
+    geom_point(size = 2) +
+    geom_errorbar(
+      aes(
+        ymin = coverage - mcse_coverage,
+        ymax = coverage + mcse_coverage
+      ),
+      width = 0.15,
+      linewidth = 0.4
+    ) +
+    geom_hline(yintercept = 0.95, linetype = "dashed", linewidth = 0.4) +
+    ggh4x::facet_wrap2(~ scenario, nrow = 1, axes = "y") +
+    scale_color_manual(values = pal_method) +
+    labs(
+      x = "Occasion",
+      y = "Coverage",
+      color = NULL
+    ) +
+    theme_classic(base_size = 13) +
+    theme(
+      panel.spacing.x = unit(1.2, "cm"),
+      strip.text      = element_text(size = 14),
+      axis.title      = element_text(size = 13),
+      axis.text       = element_text(size = 12),
+      legend.position = "bottom",
+      legend.text     = element_text(size = 12)
+    )
+}
+
+#####################################################
+# Build and display all four plots
+#####################################################
+
+plot_cov_XY <- plot_coverage(coverage_df, "XY")
+plot_cov_YX <- plot_coverage(coverage_df, "YX")
+plot_cov_AX <- plot_coverage(coverage_df, "AX")
+plot_cov_AY <- plot_coverage(coverage_df, "AY")
+
+plot_cov_XY
+plot_cov_YX
+plot_cov_AX
+plot_cov_AY
+
+```
+
+### Plot 4.2: Type I Error Simulation Study 2
+
+```{r}
+
+
+#####################################################
+# Build type I error data for all lagged parameters
+#####################################################
+
+# true parameters from the data-generating model
+true_params <- tibble(
+  estimand = c("XY", "YX", "AX", "AY"),
+  true     = c(
+    A[2, 1],  # XY
+    A[1, 2],  # YX (typically 0)
+    A[1, 1],  # AX
+    A[2, 2]   # AY
+  )
+)
+
+#####################################################
+# --- p-values ---
+#####################################################
+
+pval_df <- results_sim2 %>%
+
+  # only occasions with lagged parameters
+  filter(occasion >= 2) %>%
+
+  # reshape p-values to long format
+  pivot_longer(
+    cols = matches("^p(XY|YX|A|AY)_"),
+    names_to  = "param",
+    values_to = "pval"
+  ) %>%
+
+  # drop failed fits
+  filter(!is.na(pval)) %>%
+
+  # identify estimand type and method
+  mutate(
+    estimand = case_when(
+      str_detect(param, "^pXY_") ~ "XY",
+      str_detect(param, "^pYX_") ~ "YX",
+      str_detect(param, "^pA_")  ~ "AX",
+      str_detect(param, "^pAY_") ~ "AY"
+    ),
+
+    method = param %>%
+      str_remove("^p(XY|YX|A|AY)_") %>%
+      recode(
+        CLPM      = "CLPM",
+        CLPM_Adj  = "Lin adj",
+        CLPM_LBCA = "CLPM linear BCA",
+        CLPM_XGB  = "CLPM XGB BCA",
+        DPM       = "DPM",
+        RI_CLPM   = "RI-CLPM"
+      )
+  ) %>%
+  select(run, occasion, scenario, estimand, method, pval)
+
+#####################################################
+# Build type I error data frame
+#####################################################
+
+type1_df <- pval_df %>%
+
+  # attach true parameter values
+  left_join(true_params, by = "estimand") %>%
+
+  # only estimands where the null is true (theta = 0)
+  filter(true == 0) %>%
+
+  # indicator: reject at alpha
+  mutate(
+    reject = (pval <= 0.05)
+  ) %>%
+
+  # type I error rate and Monte Carlo SE
+  group_by(scenario, occasion, estimand, method) %>%
+  reframe(
+    nsim = n(),
+
+    # type I error rate
+    type1 = mean(reject),
+
+    # Monte Carlo SE of type I error rate
+    mcse_type1 =
+      sqrt(type1 * (1 - type1) / nsim)
+  ) %>%
+
+  # clean factor ordering
+  mutate(
+    scenario = factor(scenario, levels = c("constant", "stepwise")),
+    method   = factor(
+      method,
+      levels = c(
+        "CLPM",
+        "Lin adj",
+        "CLPM linear BCA",
+        "CLPM XGB BCA",
+        "DPM",
+        "RI-CLPM"
+      )
+    )
+  )
+
+#####################################################
+# Colour palette for methods (shared across plots)
+#####################################################
+
+pal_method <- qualitative_hcl(
+  n = nlevels(type1_df$method),
+  palette = "Set 2"
+)
+names(pal_method) <- levels(type1_df$method)
+
+#####################################################
+# Plot: type I error (only for null-true estimands)
+#####################################################
+
+plot_type1 <- type1_df %>%
+
+  ggplot(aes(
+    x     = occasion,
+    y     = type1,
+    color = method,
+    group = method
+  )) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2) +
+  geom_errorbar(
+    aes(
+      ymin = type1 - mcse_type1,
+      ymax = type1 + mcse_type1
+    ),
+    width = 0.15,
+    linewidth = 0.4
+  ) +
+
+  # nominal alpha reference line
+  geom_hline(yintercept = 0.05, linetype = "dashed", linewidth = 0.4) +
+
+  # facet by scenario
+  ggh4x::facet_wrap2(
+    ~ scenario,
+    nrow = 1,
+    axes = "y"
+  ) +
+
+  # colours
+  scale_color_manual(values = pal_method) +
+
+  # labels
+  labs(
+    x = "Occasion",
+    y = "Type I error",
+    color = NULL
+  ) +
+
+  # scientific theme
+  theme_classic(base_size = 13) +
+  theme(
+    panel.spacing.x = unit(1.2, "cm"),
+    strip.text      = element_text(size = 14),
+    axis.title      = element_text(size = 13),
+    axis.text       = element_text(size = 12),
+    legend.position = "bottom",
+    legend.text     = element_text(size = 12)
+  )
+
+#####################################################
+# Display plot
+#####################################################
+
+plot_type1
+
+```
+
+### 4.3: Type II Error Simulation Study 2
+
+
+```{r}
+
+#####################################################
+# Build power data for all lagged parameters
+#####################################################
+
+# true parameters from the data-generating model
+true_params <- tibble(
+  estimand = c("XY", "YX", "AX", "AY"),
+  true     = c(
+    A[2, 1],  # XY
+    A[1, 2],  # YX (usually 0)
+    A[1, 1],  # AX
+    A[2, 2]   # AY
+  )
+)
+
+#####################################################
+# --- p-values ---
+#####################################################
+
+pval_df <- results_sim2 %>%
+
+  # only occasions with lagged parameters
+  filter(occasion >= 2) %>%
+
+  # reshape p-values to long format
+  pivot_longer(
+    cols = matches("^p(XY|YX|A|AY)_"),
+    names_to  = "param",
+    values_to = "pval"
+  ) %>%
+
+  # drop failed fits
+  filter(!is.na(pval)) %>%
+
+  # identify estimand type and method
+  mutate(
+    estimand = case_when(
+      str_detect(param, "^pXY_") ~ "XY",
+      str_detect(param, "^pYX_") ~ "YX",
+      str_detect(param, "^pA_")  ~ "AX",
+      str_detect(param, "^pAY_") ~ "AY"
+    ),
+
+    method = param %>%
+      str_remove("^p(XY|YX|A|AY)_") %>%
+      recode(
+        CLPM      = "CLPM",
+        CLPM_Adj  = "Lin adj",
+        CLPM_LBCA = "CLPM linear BCA",
+        CLPM_XGB  = "CLPM XGB BCA",
+        DPM       = "DPM",
+        RI_CLPM   = "RI-CLPM"
+      )
+  ) %>%
+  select(run, occasion, scenario, estimand, method, pval)
+
+#####################################################
+# Build power data frame
+#####################################################
+
+power_df <- pval_df %>%
+
+  # attach true parameter values
+  left_join(true_params, by = "estimand") %>%
+
+  # only estimands where the null is false
+  filter(true != 0) %>%
+
+  # indicator: reject at alpha
+  mutate(
+    reject = (pval <= 0.05)
+  ) %>%
+
+  # power and Monte Carlo SE
+  group_by(scenario, occasion, estimand, method) %>%
+  reframe(
+    nsim = n(),
+
+    # power
+    power = mean(reject),
+
+    # Monte Carlo SE of power
+    mcse_power =
+      sqrt(power * (1 - power) / nsim)
+  ) %>%
+
+  # clean factor ordering
+  mutate(
+    scenario = factor(scenario, levels = c("constant", "stepwise")),
+    method   = factor(
+      method,
+      levels = c(
+        "CLPM",
+        "Lin adj",
+        "CLPM linear BCA",
+        "CLPM XGB BCA",
+        "DPM",
+        "RI-CLPM"
+      )
+    )
+  )
+
+#####################################################
+# Colour palette for methods (shared across plots)
+#####################################################
+
+pal_method <- qualitative_hcl(
+  n = nlevels(power_df$method),
+  palette = "Set 2"
+)
+names(pal_method) <- levels(power_df$method)
+
+#####################################################
+# Plot helper (used for all three estimands)
+#####################################################
+
+plot_power <- function(df, estimand_label) {
+
+  df %>%
+    filter(estimand == estimand_label) %>%
+
+    ggplot(aes(
+      x     = occasion,
+      y     = power,
+      color = method,
+      group = method
+    )) +
+    geom_line(linewidth = 0.9) +
+    geom_point(size = 2) +
+    geom_errorbar(
+      aes(
+        ymin = power - mcse_power,
+        ymax = power + mcse_power
+      ),
+      width = 0.15,
+      linewidth = 0.4
+    ) +
+
+    # reference line for high power
+    geom_hline(yintercept = 0.80, linetype = "dashed", linewidth = 0.4) +
+
+    # facet by scenario
+    ggh4x::facet_wrap2(
+      ~ scenario,
+      nrow = 1,
+      axes = "y"
+    ) +
+
+    # colours
+    scale_color_manual(values = pal_method) +
+
+    # labels
+    labs(
+      x = "Occasion",
+      y = "Power",
+      color = NULL
+    ) +
+
+    # scientific theme
+    theme_classic(base_size = 13) +
+    theme(
+      panel.spacing.x = unit(1.2, "cm"),
+      strip.text      = element_text(size = 14),
+      axis.title      = element_text(size = 13),
+      axis.text       = element_text(size = 12),
+      legend.position = "bottom",
+      legend.text     = element_text(size = 12)
+    )
+}
+
+#####################################################
+# Build and display all three power plots
+#####################################################
+
+plot_power_XY <- plot_power(power_df, "XY")
+plot_power_AX <- plot_power(power_df, "AX")
+plot_power_AY <- plot_power(power_df, "AY")
+
+plot_power_XY
+plot_power_AX
+plot_power_AY
+
+```
+
+Now we need to concatenate the plots:
+
+```{r}
+
+library(patchwork)
+
+# create legendless plots
+plot_relbias_XY_noleg <- plot_relbias_XY +
+  theme(legend.position = "none")
+
+# combine the two
+combined_XY <- plot_relbias_XY_noleg / plot_rmse_XY
+
+ggsave(
+  filename = "combined_XY_relbias_RMSE.png",
+  plot     = combined_XY,
+  path     = "C:/Users/Admin/Desktop",
+  width    = 10,
+  height   = 8,
+  dpi      = 300
+)
+
+```
