@@ -13,3 +13,7 @@ Is it a problem that we hand-pick scenarios?
 8. Make this a package with proper explanation. 
 8. Do an example application on real data.
 
+Others, not neccessarily do, but more read up on:
+* Origins of DPMs. 
+* Is this method better suited to economics or epidemiology?
+* Go back to the beginning. Create an overview of the existing models. How does the ML approach stand out? 
