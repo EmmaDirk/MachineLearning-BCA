@@ -4,7 +4,8 @@
 # - CLPM with direct confounder adjustment
 # - RI-CLPM with indirect confounder adjustment via random intercepts
 # - DPM
-# - BCA CLPM with residualised X and Y
+# - BCA CLPM with linearly residualised X and Y
+# - BCA CLPM with XGB residualised X and Y
 # ------------------------------------------------------------------------------------------------------------
 
 safe_fit_clpm <- function(model_string, data) {
@@ -148,8 +149,7 @@ safe_fit_clpm_C <- function(model_string, data) {
   list(fit = fit, err = err)
 }
 
-# same as above but for CLPM with residualised confounders
-safe_fit_clpm_resid <- function(model_string, data) {
+safe_fit_clpm_resid <- function(model_string, data, k) {
 
   # initialize error message
   err <- NA_character_
@@ -158,7 +158,61 @@ safe_fit_clpm_resid <- function(model_string, data) {
   df_resid <- tryCatch(
 
     # residualise the data using the helper function
-    residualise_panel_linearC(data),
+    residualise_panel_linearC(data, k),
+
+    # capture error message if residualisation fails
+    error = function(e) {
+      err <<- conditionMessage(e)
+      NULL
+    }
+  )
+
+  # if residualisation failed, return NULL fit and the error message
+  if (is.null(df_resid)) {
+    return(list(fit = NULL, err = err))
+  }
+
+  # try to fit the CLPM on the residualised data
+  fit <- tryCatch(
+
+    # use lavaan
+    lavaan::lavaan(
+
+      # the model string produced by the model builder
+      model_string,
+
+      # the residualised data
+      data      = df_resid,
+
+      # use full information maximum likelihood
+      estimator = "ML",
+
+      # turn off warnings
+      warn      = FALSE
+    ),
+
+    # capture error message if fitting fails
+    error = function(e) {
+      err <<- conditionMessage(e)
+      NULL
+    }
+  )
+
+  # return fit and error
+  list(fit = fit, err = err)
+}
+
+# same as above but for CLPM with XGB residualisation
+safe_fit_clpm_xgb <- function(model_string, data, k) {
+
+  # initialize error message
+  err <- NA_character_
+
+  # first residualise the data using XGBoost
+  df_resid <- tryCatch(
+
+    # residualise the data using the XGBoost helper function
+    residualise_panel_xgb(data, k),
 
     # capture error message if residualisation fails
     error = function(e) {

@@ -1,19 +1,16 @@
-# This script contains afunction that runs all other functions for one replication of the study
-# this function should contain all the arguments that are defined in the previous sections
-# ------------------------------------------------------------------------------------------------
-
 run_one_rep_study <- function(
   rep_id,                                                 # replication index (set by outer loop)
   N,                                                      # sample size
-  T,                                                      # number of waves (checked against B_scenarios)
-  k,                                                      # number of confounders (checked against B_scenarios / Psi)
-  scenarios,                                              # scenario names (must match names(B_scenarios))
-  B_scenarios,                                            # named list: each scenario is a list of length T of 2 x k matrices
+  T,                                                      # number of waves
+  k,                                                      # number of confounders
+  scenarios,                                              # scenario names
+  B_scenarios,                                            # named list of beta trajectories
   A,                                                      # 2×2 autoregressive + cross-lag matrix
   Psi,                                                    # k×k confounder covariance
   rho_extra,                                              # extra covariance added to X,Y each wave
   models_to_run,                                          # e.g. c("clpm","riclpm","dpm","lbca","adj")
-  base_seed = 1234                                        # base seed
+  base_seed = 1234,                                       # base seed
+  ci_level = 0.95                                         # CI level for extracted parameters
 ){
 
   # set seed for this replication
@@ -23,7 +20,7 @@ run_one_rep_study <- function(
   if (is.null(B_scenarios))
     stop("B_scenarios is NULL. Please provide pre-defined beta trajectories via B_scenarios.")
 
-  # check that all requested scenarios exist
+  # check that scenarios exist in B_scenarios
   missing_scens <- setdiff(scenarios, names(B_scenarios))
   if (length(missing_scens) > 0)
     stop("Scenario(s) not found in B_scenarios: ", paste(missing_scens, collapse = ", "))
@@ -48,13 +45,9 @@ run_one_rep_study <- function(
     # take the beta trajectory for this scenario
     B_list <- B_scenarios[[scen]]
 
-    # check we got a list of matrices
-    if (!is.list(B_list))
-      stop("B_scenarios[['", scen, "']] must be a list of length T.")
-
     # check the trajectory has length T
-    if (length(B_list) != T)
-      stop("B_scenarios[['", scen, "']] has length ", length(B_list), " but T = ", T, ".")
+    if (!is.list(B_list) || length(B_list) != T)
+      stop("B_scenarios[['", scen, "']] must be a list of length T.")
 
     # check each matrix is 2 x k
     bad_dims <- vapply(B_list, function(Bt) {
@@ -64,7 +57,7 @@ run_one_rep_study <- function(
     if (any(bad_dims))
       stop("One or more B matrices in scenario '", scen, "' are not 2 x k with k = ", k, ".")
 
-    # compute beta summaries per wave (kept because output needs beta_X, beta_Y, beta)
+    # extract mean betas
     beta_X_vec <- sapply(B_list, function(Bt) mean(Bt[1, ]))
     beta_Y_vec <- sapply(B_list, function(Bt) mean(Bt[2, ]))
     beta_vec   <- beta_X_vec
@@ -159,11 +152,11 @@ run_one_rep_study <- function(
     fit_lbca     <- res_lbca$fit
 
     # extract lagged parameters
-    lag_raw  <- extract_lagged_parameters(fit_clpm_raw, T, "clpm")
-    lag_ric  <- extract_lagged_parameters(fit_ric,       T, "riclpm")
-    lag_dpm0 <- extract_lagged_parameters(fit_dpm0,      T, "dpm")
-    lag_adj  <- extract_lagged_parameters(fit_adj,       T, "clpm")
-    lag_lbca <- extract_lagged_parameters(fit_lbca,      T, "clpm")
+    lag_raw  <- extract_lagged_parameters(fit_clpm_raw, T, "clpm",   ci_level = ci_level)
+    lag_ric  <- extract_lagged_parameters(fit_ric,       T, "riclpm", ci_level = ci_level)
+    lag_dpm0 <- extract_lagged_parameters(fit_dpm0,      T, "dpm",    ci_level = ci_level)
+    lag_adj  <- extract_lagged_parameters(fit_adj,       T, "clpm",   ci_level = ci_level)
+    lag_lbca <- extract_lagged_parameters(fit_lbca,      T, "clpm",   ci_level = ci_level)
 
     # extract residual correlations from CLPM
     rho_clpm <- extract_rho_vec(fit_clpm_raw, T, "clpm")
@@ -227,6 +220,5 @@ run_one_rep_study <- function(
     )
   }
 
-  # bind rows for all scenarios
   dplyr::bind_rows(out_list)
 }

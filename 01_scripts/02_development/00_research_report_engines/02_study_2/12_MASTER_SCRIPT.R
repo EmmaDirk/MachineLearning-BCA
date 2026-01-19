@@ -8,11 +8,11 @@ library(here)
 set.seed(1234)
 
 # step 0: load the required packages
-source(here("01_scripts", "02_development", "00_research_report_engines", "01_study_1", "00_packages.R"))
+source(here("01_scripts", "02_development", "00_research_report_engines", "02_study_2", "00_packages.R"))
 
 # step 1: sample a beta-matrix
 # get the function to sample the beta-matrix
-source(here("01_scripts", "02_development", "00_research_report_engines", "01_study_1", "01_beta_sampler.R"))
+source(here("01_scripts", "02_development", "00_research_report_engines", "02_study_2", "01_beta_sampler.R"))
 
 # sample B1 matrix
 B1 <- sample_B1(
@@ -20,12 +20,12 @@ B1 <- sample_B1(
   R2_1 = 0.15,                                         # total confounder R2 at time t = 1 
   min_abs = 0.001,                                     # minimum absolute value for each beta
   max_abs = 0.40,                                      # maximum absolute value for each beta
-  eta_1 = 0                                            # fraction of R2_1 allocated to non-linear terms
+  eta_1 = 0.1                                         # fraction of R2_1 allocated to non-linear terms
 )
 
 # step 2: make a beta trajectory from the sampled beta-matrix
 # get the function to make the beta trajectory
-source(here("01_scripts", "02_development", "00_research_report_engines", "01_study_1", "02_beta_trajectory.R"))
+source(here("01_scripts", "02_development", "00_research_report_engines", "02_study_2", "02_beta_trajectory.R"))
 
 # make a constant beta trajectory over 5 time points
 B_list_constant <- generate_B_constant(
@@ -53,22 +53,23 @@ A <- matrix(c(
 Psi <- diag(3)                     # uncorrelated confounders with var=1
 
 # step 5: call all the functions that the simulation function (09) needs
-source(here("01_scripts", "02_development", "00_research_report_engines", "01_study_1", "03_simulate_panel_data.R"))
-source(here("01_scripts", "02_development", "00_research_report_engines", "01_study_1", "04_lavaan_model_string_builder.R"))
-source(here("01_scripts", "02_development", "00_research_report_engines", "01_study_1", "05_linear_residualiser.R"))
-source(here("01_scripts", "02_development", "00_research_report_engines", "01_study_1", "06_model_fitters.R"))
-source(here("01_scripts", "02_development", "00_research_report_engines", "01_study_1", "07_fit_stat_extractors.R"))
-source(here("01_scripts", "02_development", "00_research_report_engines", "01_study_1", "08_one_replication_wrapper.R"))
+source(here("01_scripts", "02_development", "00_research_report_engines", "02_study_2", "03_simulate_panel_data.R"))
+source(here("01_scripts", "02_development", "00_research_report_engines", "02_study_2", "04_lavaan_model_string_builder.R"))
+source(here("01_scripts", "02_development", "00_research_report_engines", "02_study_2", "05_residualisers.R"))
+source(here("01_scripts", "02_development", "00_research_report_engines", "02_study_2", "06_model_fitters.R"))
+source(here("01_scripts", "02_development", "00_research_report_engines", "02_study_2", "07_model_tuners.R"))
+source(here("01_scripts", "02_development", "00_research_report_engines", "02_study_2", "08_fit_stat_extractors.R"))
+source(here("01_scripts", "02_development", "00_research_report_engines", "02_study_2", "09_one_replication_wrapper.R"))
 
 # step 6: run the simulation study function
 # get the function to run the full simulation study
-source(here("01_scripts", "02_development", "00_research_report_engines", "01_study_1", "09_simulation_function.R"))
+source(here("01_scripts", "02_development", "00_research_report_engines", "02_study_2", "10_simulation_function.R"))
 
 # run the simulation study
 # run a small example simulation study
 results_sim <- run_simulation_study(
   reps        = 20,                                    # replications
-  N           = 5000,                                  # sample size
+  N           = 100,                                   # sample size
   T           = 5,                                     # number of time points
   k           = 3,                                     # number of confounders
   scenarios   = c("constant", "stepwise"),             # B scenarios
@@ -84,7 +85,8 @@ results_sim <- run_simulation_study(
     "riclpm",
     "dpm",
     "adj",
-    "lbca"
+    "lbca",
+    "xgb"
   ),
   ci_level    = 0.95,                                  # confidence level
 
@@ -105,7 +107,7 @@ saveRDS(
 
 # step 8: produce the plot
 # get the plotting function
-source(here("01_scripts", "02_development", "00_research_report_engines", "01_study_1", "10_plotting.R"))
+source(here("01_scripts", "02_development", "00_research_report_engines", "02_study_2", "11_plotting.R"))
 
 # produce the plot
 p <- plot_sim_study_results(
