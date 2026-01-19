@@ -1,0 +1,4 @@
+In this folder are simulation studies. In each folder is a collection of scripts which together form a simulation engine. All complete engines or engines under construction will be added to this directory. The following studies are currently available:
+
+* 01_study_1: this is simulation study 1 from the research report. It aims to investigate the performance of various longitudinal models if effects of confounders vary over time.
+* 02_study_2: this is simulation study 2 from the research report. It aims to investigate the performance of various longitudinal models if effects vary over time AND there is a non-linear (interaction) effect of the confounders. 
