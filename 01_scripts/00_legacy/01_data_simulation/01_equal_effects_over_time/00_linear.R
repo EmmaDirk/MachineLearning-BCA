@@ -232,6 +232,5 @@ ggplot(df_sample, aes(x = c1, y = residuals)) +
   geom_smooth(method = "loess", se = FALSE) +
   theme_minimal()
 
-# cache the data to the data folder
-write.csv(df, file = "Thesis/Code/Data/Data_Sim_linear_Pop.csv", row.names = FALSE)
+
 
