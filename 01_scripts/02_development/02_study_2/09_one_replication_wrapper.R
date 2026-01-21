@@ -16,6 +16,13 @@
 # 7) It stores the results in a list (one element per scenario) and returns a single bound data frame.
 # ------------------------------------------------------------------------------------------------------------
 
+if (!exists("n_interactions_from_k")) {
+  n_interactions_from_k <- function(k) {
+    if (is.na(k) || k < 2) return(0L)
+    sum(vapply(2:k, function(m) choose(k, m), numeric(1)))
+  }
+}
+
 run_one_rep_study <- function(
   rep_id,                                                 # replication index (set by outer loop)
   N,                                                      # sample size
@@ -28,8 +35,14 @@ run_one_rep_study <- function(
   rho_extra,                                              # extra covariance added to X,Y each wave
   models_to_run,                                          # e.g. c("clpm","riclpm","dpm","lbca","adj","xgb")
   base_seed = 1234,                                       # base seed
-  ci_level = 0.95                                         # CI level for extracted parameters
+  ci_level = 0.95,                                        # CI level for extracted parameters
+  xgb_tuned = NULL,
+  xgb_fit_profile = c("fast", "balanced", "thorough"),
+  xgb_fit_overrides = NULL
 ){
+
+  # match xgb fit profile argument
+  xgb_fit_profile <- match.arg(xgb_fit_profile)
 
   # set seed for this replication
   set.seed(base_seed + rep_id)
@@ -107,7 +120,7 @@ run_one_rep_study <- function(
         N         = N,
         T         = T,
         A         = A,
-        B_list    = B_list,
+        D_list    = B_list,
         Psi       = Psi,
         rho_extra = rho_extra
       ),
@@ -206,7 +219,14 @@ run_one_rep_study <- function(
 
     # fit LBCA and XGB using only the linear confounders (c1..ck)
     res_lbca <- if ("lbca"   %in% models_to_run) safe_fit_clpm_resid(model_clpm, df, k)  else list(fit = NULL, err = NA_character_)
-    res_xgb  <- if ("xgb"    %in% models_to_run) safe_fit_clpm_xgb(model_clpm, df, k)    else list(fit = NULL, err = NA_character_)
+    res_xgb  <- if ("xgb"    %in% models_to_run) safe_fit_clpm_xgb(
+      model_string = model_clpm,
+      data = df,
+      k = k,
+      xgb_tuned = xgb_tuned,
+      xgb_fit_profile = xgb_fit_profile,
+      xgb_fit_overrides = xgb_fit_overrides
+    ) else list(fit = NULL, err = NA_character_)
 
     # pull fitted objects
     fit_clpm_raw <- res_clpm$fit

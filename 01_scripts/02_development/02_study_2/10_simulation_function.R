@@ -1,4 +1,4 @@
-# this script runs the wrapper function that executes one replication of the simulation study
+# 10_simulation_function: # this script runs the wrapper function that executes one replication of the simulation study
 # adding a progress bar and parallelization
 #
 # This function runs the full simulation study by repeatedly calling run_one_rep_study() across replications,
@@ -47,8 +47,26 @@ run_simulation_study <- function(
   base_seed = 1234,                                                        # master seed for reproducible reps
   ci_level = 0.95,                                                         # CI level for extracted parameters
   xgb_tuned = NULL,                                                        # optionally provide a tuned object directly
-  tune_xgb = TRUE                                                          # if TRUE and xgb_tuned is NULL, tune once on a pilot dataset
+  tune_xgb = TRUE,                                                         # if TRUE and xgb_tuned is NULL, tune once on a pilot dataset
+  xgb_tune_profile = c("quick", "medium", "full"),
+  xgb_fit_profile = c("fast", "balanced", "thorough"),
+  xgb_tune_grid = NULL,
+  xgb_tune_overrides = NULL,
+  xgb_fit_overrides = NULL,
+  xgb_profile = NULL
 ) {
+
+  # xgb tuning settings are passed as arguments
+  # xgb fitting settings are passed as arguments
+
+  # allow legacy alias from the master script
+  if (!is.null(xgb_profile)) {
+    xgb_tune_profile <- xgb_profile
+  }
+
+  # match xgb profile arguments
+  xgb_tune_profile <- match.arg(xgb_tune_profile)
+  xgb_fit_profile  <- match.arg(xgb_fit_profile)
 
   # if cores is not specified, detect and use half of available cores
   if (is.null(cores)) {
@@ -82,13 +100,28 @@ run_simulation_study <- function(
       N         = N,
       T         = T,
       A         = A,
-      B_list    = D_list_pilot,   # simulate_panel_data_int uses B_list as argument name
+      D_list    = D_list_pilot,
       Psi       = Psi,
       rho_extra = rho_extra
     )
 
+    # build tuning arguments
+    tune_args <- list(
+      df = df_pilot,
+      k = k,
+      tune_profile = xgb_tune_profile,
+      tune_grid = xgb_tune_grid,
+      seed = 1
+    )
+
+    # allow overwrite options for tuning
+    if (!is.null(xgb_tune_overrides)) {
+      if (!is.list(xgb_tune_overrides)) stop("xgb_tune_overrides must be a list when provided.")
+      tune_args <- c(tune_args, xgb_tune_overrides)
+    }
+
     # tune and store locally for passing into run_one_rep_study
-    xgb_tuned <- tune_xgb_once(df_pilot, k)
+    xgb_tuned <- do.call(tune_xgb_once, tune_args)
   }
 
   # run sequentially if cores is 1
@@ -98,19 +131,21 @@ run_simulation_study <- function(
       X = 1:reps,
       FUN = function(rep_id) {
         run_one_rep_study(
-          rep_id        = rep_id,
-          N             = N,
-          T             = T,
-          k             = k,
-          scenarios     = scenarios,
-          D_scenarios   = D_scenarios,
-          A             = A,
-          Psi           = Psi,
-          rho_extra     = rho_extra,
-          models_to_run = models_to_run,
-          base_seed     = base_seed,
-          ci_level      = ci_level,
-          xgb_tuned     = xgb_tuned
+          rep_id          = rep_id,
+          N               = N,
+          T               = T,
+          k               = k,
+          scenarios       = scenarios,
+          B_scenarios     = D_scenarios,
+          A               = A,
+          Psi             = Psi,
+          rho_extra       = rho_extra,
+          models_to_run   = models_to_run,
+          base_seed       = base_seed,
+          ci_level        = ci_level,
+          xgb_tuned       = xgb_tuned,
+          xgb_fit_profile = xgb_fit_profile,
+          xgb_fit_overrides = xgb_fit_overrides
         )
       }
     )
@@ -139,11 +174,33 @@ run_simulation_study <- function(
       "simulate_panel_data_int",
       "tune_xgb_once",
 
+      "build_clpm",
+      "build_clpm_with_Cs",
+      "build_riclpm",
+      "build_dpm",
+
+      "residualise_panel_linearC",
+      "residualise_panel_xgb",
+
+      "safe_fit_clpm",
+      "safe_fit_riclpm",
+      "safe_fit_dpm",
+      "safe_fit_clpm_C",
+      "safe_fit_clpm_resid",
+      "safe_fit_clpm_xgb",
+
+      "extract_lagged_parameters",
+      "extract_rho_vec",
+
+      "n_interactions_from_k",
       "run_one_rep_study",
 
       "N","T","k","scenarios","D_scenarios",
       "A","Psi","rho_extra","models_to_run","base_seed","ci_level",
-      "xgb_tuned"
+
+      "xgb_tuned",
+      "xgb_fit_profile",
+      "xgb_fit_overrides"
     ),
     envir = environment()
   )
@@ -154,19 +211,21 @@ run_simulation_study <- function(
     cl = cl,
     FUN = function(rep_id) {
       run_one_rep_study(
-        rep_id        = rep_id,
-        N             = N,
-        T             = T,
-        k             = k,
-        scenarios     = scenarios,
-        D_scenarios   = D_scenarios,
-        A             = A,
-        Psi           = Psi,
-        rho_extra     = rho_extra,
-        models_to_run = models_to_run,
-        base_seed     = base_seed,
-        ci_level      = ci_level,
-        xgb_tuned     = xgb_tuned
+        rep_id          = rep_id,
+        N               = N,
+        T               = T,
+        k               = k,
+        scenarios       = scenarios,
+        B_scenarios     = D_scenarios,
+        A               = A,
+        Psi             = Psi,
+        rho_extra       = rho_extra,
+        models_to_run   = models_to_run,
+        base_seed       = base_seed,
+        ci_level        = ci_level,
+        xgb_tuned       = xgb_tuned,
+        xgb_fit_profile = xgb_fit_profile,
+        xgb_fit_overrides = xgb_fit_overrides
       )
     }
   )

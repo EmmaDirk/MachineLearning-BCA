@@ -169,7 +169,7 @@ safe_fit_clpm_resid <- function(model_string, data, k) {
   df_resid <- tryCatch(
 
     # residualise the data using the helper function
-    residualise_panel_linearC(data, k),
+    residualise_panel_linearC(data, k = k),
 
     # capture error message if residualisation fails
     error = function(e) {
@@ -214,7 +214,15 @@ safe_fit_clpm_resid <- function(model_string, data, k) {
 }
 
 # same as above but for CLPM with XGB BCA residualisation
-safe_fit_clpm_xgb <- function(model_string, data, k) {
+safe_fit_clpm_xgb <- function(model_string,
+                              data,
+                              k,
+                              xgb_tuned,
+                              xgb_fit_profile = c("fast", "balanced", "thorough"),
+                              xgb_fit_overrides = NULL) {
+
+  # match fit profile argument
+  xgb_fit_profile <- match.arg(xgb_fit_profile)
 
   # initialize error message
   err <- NA_character_
@@ -223,7 +231,13 @@ safe_fit_clpm_xgb <- function(model_string, data, k) {
   df_resid <- tryCatch(
 
     # residualise the data using the XGBoost helper function
-    residualise_panel_xgb(data, k),
+    residualise_panel_xgb(
+      df = data,
+      k = k,
+      xgb_tuned = xgb_tuned,
+      fit_profile = xgb_fit_profile,
+      fit_overrides = xgb_fit_overrides
+    ),
 
     # capture error message if residualisation fails
     error = function(e) {

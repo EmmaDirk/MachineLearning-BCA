@@ -9,16 +9,21 @@
 # - "full": large grid + richer complexity (closest to "real" tuning)
 # ------------------------------------------------------------------------------------------------------------
 
+# custom tune grids can be provided as an overwrite option
+# tuned output is returned and must be passed into later functions
+
 tune_xgb_once <- function(df,                                             # data frame with panel data
                           k,                                              # number of confounders
                           x_prefix = "x",                                 # prefix for X variables
                           y_prefix = "y",                                 # prefix for Y variables
                           c_prefix = "c",                                 # prefix for confounder variables
                           tune_profile = c("quick", "medium", "full"),    # tune profile (controls grid size and complexity)
+                          tune_grid = NULL,                               # optional overwrite grid for hyperparameters
                           nfold = NULL,                                   # number of CV folds (ovveriding profile default)
                           nrounds_max = NULL,                             # max number of boosting rounds (overriding profile default)
                           early_stopping_rounds = NULL,                   # early stopping rounds (overriding profile default)
                           max_grid = NULL,                                # max grid size (overriding profile default)
+                          nthread = NULL,                                 # threads used inside xgb cv
                           seed = 1) {                                     # random seed
 
   # match tune profile argument
@@ -97,6 +102,7 @@ tune_xgb_once <- function(df,                                             # data
   if (is.null(nrounds_max)) nrounds_max <- profile_defaults$nrounds_max
   if (is.null(early_stopping_rounds)) early_stopping_rounds <- profile_defaults$early_stopping_rounds
   if (is.null(max_grid)) max_grid <- profile_defaults$max_grid
+  if (is.null(nthread)) nthread <- max(1, parallel::detectCores() - 1)
 
   # convert to data frame
   df <- as.data.frame(df)
@@ -107,6 +113,11 @@ tune_xgb_once <- function(df,                                             # data
 
   # only linear confounders are observed
   c_cols <- paste0(c_prefix, 1:k)
+
+  # stop if requested confounders are missing
+  missing_c <- setdiff(c_cols, names(df))
+  if (length(missing_c) > 0)
+    stop("Requested confounder columns not found: ", paste(missing_c, collapse = ", "))
 
   # confounder matrix (standardised for XGB stability)
   C <- scale(as.matrix(df[c_cols]))
@@ -129,18 +140,33 @@ tune_xgb_once <- function(df,                                             # data
     # create folds based on person assignment
     folds <- lapply(1:nfold, function(f) which(fold_id_person[person_id] == f))
 
-    # grid of hyperparameters (profile-dependent)
-    grid <- expand.grid(
-      max_depth        = profile_defaults$grid$max_depth,
-      min_child_weight = profile_defaults$grid$min_child_weight,
-      eta              = profile_defaults$grid$eta,
-      subsample        = profile_defaults$grid$subsample,
-      colsample_bytree = profile_defaults$grid$colsample_bytree,
-      gamma            = profile_defaults$grid$gamma,
-      lambda           = profile_defaults$grid$lambda,
-      alpha            = profile_defaults$grid$alpha,
-      KEEP.OUT.ATTRS   = FALSE
-    )
+    # build the grid
+    if (!is.null(tune_grid)) {
+
+      # allow either a data frame or a list of vectors
+      if (is.data.frame(tune_grid)) {
+        grid <- tune_grid
+      } else if (is.list(tune_grid)) {
+        grid <- expand.grid(tune_grid, KEEP.OUT.ATTRS = FALSE, stringsAsFactors = FALSE)
+      } else {
+        stop("tune_grid must be a data frame a list or NULL")
+      }
+
+    } else {
+
+      # grid of hyperparameters (profile-dependent)
+      grid <- expand.grid(
+        max_depth        = profile_defaults$grid$max_depth,
+        min_child_weight = profile_defaults$grid$min_child_weight,
+        eta              = profile_defaults$grid$eta,
+        subsample        = profile_defaults$grid$subsample,
+        colsample_bytree = profile_defaults$grid$colsample_bytree,
+        gamma            = profile_defaults$grid$gamma,
+        lambda           = profile_defaults$grid$lambda,
+        alpha            = profile_defaults$grid$alpha,
+        KEEP.OUT.ATTRS   = FALSE
+      )
+    }
 
     # trim the grid to keep tuning feasible
     # if the grid is larger than max_grid, sample without replacement
@@ -189,7 +215,7 @@ tune_xgb_once <- function(df,                                             # data
             eval_metric = "rmse",
             booster = "gbtree",
             tree_method = "hist",
-            nthread = max(1, parallel::detectCores() - 1)
+            nthread = nthread
           ),
 
           # return the current grid row
@@ -225,7 +251,8 @@ tune_xgb_once <- function(df,                                             # data
   cat(" - Profile:", tune_profile, "\n")
   cat(" - CV folds:", nfold, "\n")
   cat(" - Max grid size:", max_grid, "\n")
-  cat(" - nrounds_max:", nrounds_max, " | early_stopping_rounds:", early_stopping_rounds, "\n\n")
+  cat(" - nrounds_max:", nrounds_max, " | early_stopping_rounds:", early_stopping_rounds, "\n")
+  cat(" - nthread:", nthread, "\n\n")
 
   # tune X and Y separately
   # stack data for tuning``
@@ -268,11 +295,9 @@ tune_xgb_once <- function(df,                                             # data
     nfold = nfold,
     nrounds_max = nrounds_max,
     early_stopping_rounds = early_stopping_rounds,
-    max_grid = max_grid
+    max_grid = max_grid,
+    nthread = nthread
   )
-
-  # make tuned settings available to residualise_panel_xgb() in this R session
-  XGB_TUNED <<- out
 
   return(out)
 }

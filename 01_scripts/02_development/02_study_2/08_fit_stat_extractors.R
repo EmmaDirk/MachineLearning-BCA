@@ -119,20 +119,32 @@ extract_lagged_parameters <- function(
 extract_rho_vec <- function(
     fit,                                                           # lavaan model object
     T,                                                             # number of time points
-    model_type = c("clpm","riclpm","dpm")                          # model type
+    model_type = c("clpm","riclpm","dpm"),                         # model type
+    ci_level = 0.95                                                # CI level
 ){
 
   # match model type
   model_type <- match.arg(model_type)
 
-  # if the model fit failed, return NAs
-  if (is.null(fit)) return(rep(NA_real_, T))
+  # prepare empty output
+  out <- data.frame(
+    est = rep(NA_real_, T),
+    p = rep(NA_real_, T),
+    ci.lower = rep(NA_real_, T),
+    ci.upper = rep(NA_real_, T)
+  )
 
-  # try to extract parameter estimates
-  pe <- tryCatch(lavaan::parameterEstimates(fit), error=function(e) NULL)
+  # if the model fit failed, return NAs
+  if (is.null(fit)) return(out)
+
+  # try to extract parameter estimates with ci
+  pe <- tryCatch(
+    lavaan::parameterEstimates(fit, ci = TRUE, level = ci_level),
+    error = function(e) NULL
+  )
 
   # if extraction failed, return NAs
-  if (is.null(pe)) return(rep(NA_real_, T))
+  if (is.null(pe)) return(out)
 
   # determine variable names based on model type, default is x, otherwise is wx
   if (model_type == "riclpm") {
@@ -143,59 +155,39 @@ extract_rho_vec <- function(
     yvar <- "y"
   }
 
-  # prepare container
-  rho <- numeric(T)
-
   # extract rho
   for (t in 1:T) {
 
-    # the left hand side of the correlation equation
     lhs_xy <- paste0(xvar, t)
-
-    # the right hand side of the correlation equation
     lhs_yx <- paste0(yvar, t)
 
-    # find the covariance estimate between x_t and y_t
+    # covariance row
     ix <- which(pe$op == "~~" & pe$lhs == lhs_xy & pe$rhs == lhs_yx)
-
-    # if not found, try the other direction
     if (length(ix) == 0) {
-
-      # find the covariance estimate between y_t and x_t
       ix <- which(pe$op == "~~" & pe$lhs == lhs_yx & pe$rhs == lhs_xy)
     }
 
-    # if not found, return NA
-    if (length(ix) == 0) {
-      rho[t] <- NA_real_
-      next
-    }
-
-    # covariance estimate
-    cov_xy <- pe$est[ix[1]]
-
-    # find the variance estimates for x_t and y_t
+    # variance rows
     vx_idx <- which(pe$op == "~~" & pe$lhs == lhs_xy & pe$rhs == lhs_xy)
     vy_idx <- which(pe$op == "~~" & pe$lhs == lhs_yx & pe$rhs == lhs_yx)
 
-    # if not found, return NA
-    if (length(vx_idx) == 0 || length(vy_idx) == 0) {
-      rho[t] <- NA_real_
+    if (length(ix) == 0 || length(vx_idx) == 0 || length(vy_idx) == 0) {
       next
     }
 
-    # variance estimates
+    cov_xy <- pe$est[ix[1]]
     vx <- pe$est[vx_idx[1]]
     vy <- pe$est[vy_idx[1]]
 
-    # compute rho: cov_xy / sqrt(vx * vy)
     if (is.na(vx) || is.na(vy) || vx <= 0 || vy <= 0) {
-      rho[t] <- NA_real_
-    } else {
-      rho[t] <- cov_xy / sqrt(vx * vy)
+      next
     }
+
+    out$est[t] <- cov_xy / sqrt(vx * vy)
+
+    # p values and ci for rho are not returned directly by lavaan
+    # keep these as NA to avoid misleading inference
   }
 
-  # return the residual correlations vector
-  rho
+  out
 }

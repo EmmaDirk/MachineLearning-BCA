@@ -1,4 +1,4 @@
-# This master script runs simulation study 2 end-to-end and saves both the raw results and the main plot.
+# 12_master_script: # This master script runs simulation study 2 end-to-end and saves both the raw results and the main plot.
 #
 # 1) It loads packages and helper functions from the study_2 script folder.
 # 2) It samples an initial confounder-effect matrix (delta matrix at t = 1) and builds two delta trajectories:
@@ -16,38 +16,35 @@ library(here)
 # set seed for reproducibility
 set.seed(1234)
 
-# set a fast xgboost profile for quick runs
-XGB_PROFILE <- "quick"
-
 # step 0: load the required packages
 source(here("01_scripts", "02_development", "02_study_2", "00_packages.R"))
 
 # step 1: sample a delta matrix (confounder effects at t = 1)
 # get the function to sample the delta matrix
-source(here("01_scripts", "02_development", "02_study_2", "01_beta_sampler.R"))
+source(here("01_scripts", "02_development", "02_study_2", "01_delta_sampler.R"))
 
 # sample D1 matrix
-D1 <- sample_B1(
+D1 <- sample_delta_1(
   k = 3,                                               # number of confounders
-  R2_1 = 0.15,                                         # total confounder R2 at time t = 1
+  R2_total = 0.15,                                     # total confounder R2 at time t = 1
   min_abs = 0.001,                                     # minimum absolute value for each coefficient
   max_abs = 0.40,                                      # maximum absolute value for each coefficient
-  eta_1 = 0.1                                          # fraction of R2_1 allocated to non-linear terms
+  R2_nonlin = 0.1                                      # fraction of R2_1 allocated to non-linear terms
 )
 
 # step 2: make delta trajectories from the sampled delta matrix
 # get the function to make the delta trajectory
-source(here("01_scripts", "02_development", "02_study_2", "02_beta_trajectory.R"))
+source(here("01_scripts", "02_development", "02_study_2", "02_delta_trajectory.R"))
 
 # make a constant delta trajectory over 5 time points
-D_list_constant <- generate_B_constant(
-  B1 = D1,                                             # initial delta matrix
+D_list_constant <- generate_D_constant(
+  D1 = D1,                                             # initial delta matrix
   T = 5                                                # number of time points
 )
 
 # make a stepwise delta trajectory over 5 time points
-D_list_stepwise <- generate_B_stepwise(
-  B1      = D1,                                        # initial delta matrix
+D_list_stepwise <- generate_D_stepwise(
+  D1      = D1,                                        # initial delta matrix
   T       = 5,                                         # number of time points
   step_at = 4,                                         # time point at which to step
   old_R2  = 0.15,                                      # old R2 before the step
@@ -106,10 +103,18 @@ results_sim <- run_simulation_study(
   cores       = parallel::detectCores() - 1,           # number of cores for parallel processing
   base_seed   = 1234,                                  # base seed for reproducibility
 
-  # xgb tuning / profile
-  tune_xgb    = TRUE,                                  # tune once on a pilot dataset
-  xgb_tuned   = NULL,                                  # optionally pass a tuned object directly instead
-  xgb_profile = XGB_PROFILE                            # quick profile for fast runs
+  # xgb tuning and fitting speed settings
+  tune_xgb          = TRUE,                            # tune once on a pilot dataset
+  xgb_tuned         = NULL,                            # optionally pass a tuned object directly instead
+  xgb_tune_profile  = "quick",                         # tuning speed ("quick", "medium", "full")
+  xgb_fit_profile   = "fast",                          # fit speed during residualisation ("fast", "balanced", "thorough")
+
+  # overwrite options for tuning
+  xgb_tune_grid      = NULL,                           # overwrite grid, set NULL to use profile defaults
+  xgb_tune_overrides = NULL,                           # overwrite tuning settings, set NULL to use profile defaults
+
+  # overwrite options for fitting
+  xgb_fit_overrides  = NULL                            # overwrite fit settings, set NULL to use fit profile defaults
 )
 
 # step 7: save the results
