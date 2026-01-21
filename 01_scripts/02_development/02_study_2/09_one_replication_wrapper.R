@@ -1,8 +1,8 @@
-# This script contains afunction that runs all other functions for one replication of the study
+# This script contains a function that runs all other functions for one replication of the study
 # this function should contain all the arguments that are defined in the previous sections
 # ------------------------------------------------------------------------------------------------
 
-oneReplicationSimulationStudy <- function(
+run_one_rep_study <- function(
   rep_id,                                                 # replication index (set by outer loop)
   N,                                                      # sample size
   T,                                                      # number of waves
@@ -105,6 +105,7 @@ oneReplicationSimulationStudy <- function(
         beta_X   = beta_X_vec,
         beta_Y   = beta_Y_vec,
 
+        # XY
         estXY_CLPM      = NA, pXY_CLPM      = NA, ciL_XY_CLPM      = NA, ciU_XY_CLPM      = NA,
         estXY_RI_CLPM   = NA, pXY_RI_CLPM   = NA, ciL_XY_RI_CLPM   = NA, ciU_XY_RI_CLPM   = NA,
         estXY_DPM       = NA, pXY_DPM       = NA, ciL_XY_DPM       = NA, ciU_XY_DPM       = NA,
@@ -112,6 +113,7 @@ oneReplicationSimulationStudy <- function(
         estXY_CLPM_LBCA = NA, pXY_CLPM_LBCA = NA, ciL_XY_CLPM_LBCA = NA, ciU_XY_CLPM_LBCA = NA,
         estXY_CLPM_XGB  = NA, pXY_CLPM_XGB  = NA, ciL_XY_CLPM_XGB  = NA, ciU_XY_CLPM_XGB  = NA,
 
+        # YX
         estYX_CLPM      = NA, pYX_CLPM      = NA, ciL_YX_CLPM      = NA, ciU_YX_CLPM      = NA,
         estYX_RI_CLPM   = NA, pYX_RI_CLPM   = NA, ciL_YX_RI_CLPM   = NA, ciU_YX_RI_CLPM   = NA,
         estYX_DPM       = NA, pYX_DPM       = NA, ciL_YX_DPM       = NA, ciU_YX_DPM       = NA,
@@ -119,6 +121,7 @@ oneReplicationSimulationStudy <- function(
         estYX_CLPM_LBCA = NA, pYX_CLPM_LBCA = NA, ciL_YX_CLPM_LBCA = NA, ciU_YX_CLPM_LBCA = NA,
         estYX_CLPM_XGB  = NA, pYX_CLPM_XGB  = NA, ciL_YX_CLPM_XGB  = NA, ciU_YX_CLPM_XGB  = NA,
 
+        # AX
         estA_CLPM      = NA, pA_CLPM      = NA, ciL_A_CLPM      = NA, ciU_A_CLPM      = NA,
         estA_RI_CLPM   = NA, pA_RI_CLPM   = NA, ciL_A_RI_CLPM   = NA, ciU_A_RI_CLPM   = NA,
         estA_DPM       = NA, pA_DPM       = NA, ciL_A_DPM       = NA, ciU_A_DPM       = NA,
@@ -126,6 +129,7 @@ oneReplicationSimulationStudy <- function(
         estA_CLPM_LBCA = NA, pA_CLPM_LBCA = NA, ciL_A_CLPM_LBCA = NA, ciU_A_CLPM_LBCA = NA,
         estA_CLPM_XGB  = NA, pA_CLPM_XGB  = NA, ciL_A_CLPM_XGB  = NA, ciU_A_CLPM_XGB  = NA,
 
+        # AY
         estAY_CLPM      = NA, pAY_CLPM      = NA, ciL_AY_CLPM      = NA, ciU_AY_CLPM      = NA,
         estAY_RI_CLPM   = NA, pAY_RI_CLPM   = NA, ciL_AY_RI_CLPM   = NA, ciU_AY_RI_CLPM   = NA,
         estAY_DPM       = NA, pAY_DPM       = NA, ciL_AY_DPM       = NA, ciU_AY_DPM       = NA,
@@ -133,6 +137,7 @@ oneReplicationSimulationStudy <- function(
         estAY_CLPM_LBCA = NA, pAY_CLPM_LBCA = NA, ciL_AY_CLPM_LBCA = NA, ciU_AY_CLPM_LBCA = NA,
         estAY_CLPM_XGB  = NA, pAY_CLPM_XGB  = NA, ciL_AY_CLPM_XGB  = NA, ciU_AY_CLPM_XGB  = NA,
 
+        # Rho
         estRho_CLPM      = NA, pRho_CLPM      = NA, ciL_Rho_CLPM      = NA, ciU_Rho_CLPM      = NA,
         estRho_RI_CLPM   = NA, pRho_RI_CLPM   = NA, ciL_Rho_RI_CLPM   = NA, ciU_Rho_RI_CLPM   = NA,
         estRho_DPM       = NA, pRho_DPM       = NA, ciL_Rho_DPM       = NA, ciU_Rho_DPM       = NA,
@@ -185,12 +190,12 @@ oneReplicationSimulationStudy <- function(
     fit_xgb      <- res_xgb$fit
 
     # extract lagged parameters
-    lag_raw  <- extract_lagged_parameters(fit_clpm_raw, T, "clpm",   ci_level = ci_level)
-    lag_ric  <- extract_lagged_parameters(fit_ric,       T, "riclpm", ci_level = ci_level)
-    lag_dpm0 <- extract_lagged_parameters(fit_dpm0,      T, "dpm",    ci_level = ci_level)
-    lag_adj  <- extract_lagged_parameters(fit_adj,       T, "clpm",   ci_level = ci_level)
-    lag_lbca <- extract_lagged_parameters(fit_lbca,      T, "clpm",   ci_level = ci_level)
-    lag_xgb  <- extract_lagged_parameters(fit_xgb,       T, "clpm",   ci_level = ci_level)
+    lag_raw  <- extract_lagged_parameters(fit_clpm_raw, T, "clpm",    ci_level = ci_level)
+    lag_ric  <- extract_lagged_parameters(fit_ric,       T, "riclpm",  ci_level = ci_level)
+    lag_dpm0 <- extract_lagged_parameters(fit_dpm0,      T, "dpm",     ci_level = ci_level)
+    lag_adj  <- extract_lagged_parameters(fit_adj,       T, "clpm",    ci_level = ci_level)
+    lag_lbca <- extract_lagged_parameters(fit_lbca,      T, "clpm",    ci_level = ci_level)
+    lag_xgb  <- extract_lagged_parameters(fit_xgb,       T, "clpm",    ci_level = ci_level)
 
     # extract residual correlations
     rho_clpm <- extract_rho_vec(fit_clpm_raw, T, "clpm",   ci_level = ci_level)
@@ -210,6 +215,7 @@ oneReplicationSimulationStudy <- function(
       beta_X   = beta_X_vec,
       beta_Y   = beta_Y_vec,
 
+      # XY
       estXY_CLPM      = c(NA, lag_raw$xy$est),
       pXY_CLPM        = c(NA, lag_raw$xy$p),
       ciL_XY_CLPM     = c(NA, lag_raw$xy$ci.lower),
@@ -240,6 +246,7 @@ oneReplicationSimulationStudy <- function(
       ciL_XY_CLPM_XGB = c(NA, lag_xgb$xy$ci.lower),
       ciU_XY_CLPM_XGB = c(NA, lag_xgb$xy$ci.upper),
 
+      # YX
       estYX_CLPM      = c(NA, lag_raw$yx$est),
       pYX_CLPM        = c(NA, lag_raw$yx$p),
       ciL_YX_CLPM     = c(NA, lag_raw$yx$ci.lower),
@@ -270,6 +277,7 @@ oneReplicationSimulationStudy <- function(
       ciL_YX_CLPM_XGB = c(NA, lag_xgb$yx$ci.lower),
       ciU_YX_CLPM_XGB = c(NA, lag_xgb$yx$ci.upper),
 
+      # AX
       estA_CLPM      = c(NA, lag_raw$ar_x$est),
       pA_CLPM        = c(NA, lag_raw$ar_x$p),
       ciL_A_CLPM     = c(NA, lag_raw$ar_x$ci.lower),
@@ -300,6 +308,7 @@ oneReplicationSimulationStudy <- function(
       ciL_A_CLPM_XGB = c(NA, lag_xgb$ar_x$ci.lower),
       ciU_A_CLPM_XGB = c(NA, lag_xgb$ar_x$ci.upper),
 
+      # AY
       estAY_CLPM      = c(NA, lag_raw$ar_y$est),
       pAY_CLPM        = c(NA, lag_raw$ar_y$p),
       ciL_AY_CLPM     = c(NA, lag_raw$ar_y$ci.lower),
@@ -330,6 +339,7 @@ oneReplicationSimulationStudy <- function(
       ciL_AY_CLPM_XGB = c(NA, lag_xgb$ar_y$ci.lower),
       ciU_AY_CLPM_XGB = c(NA, lag_xgb$ar_y$ci.upper),
 
+      # Rho
       estRho_CLPM      = rho_clpm$est,
       pRho_CLPM        = rho_clpm$p,
       ciL_Rho_CLPM     = rho_clpm$ci.lower,

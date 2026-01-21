@@ -1,5 +1,7 @@
-# functions to safely fit models using lavaan, capturing errors without stopping execution
-# for the following models:
+# Functions to safely fit models using lavaan, capturing errors without stopping execution.
+# The BCA fitting functions call the residualisation helper function before fitting.
+#
+# The function fit the following models:
 # - CLPM without confounder adjustment
 # - CLPM with direct confounder adjustment
 # - RI-CLPM with indirect confounder adjustment via random intercepts

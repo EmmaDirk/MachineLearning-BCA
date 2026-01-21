@@ -1,6 +1,10 @@
-# since all fits are slightly different, we need to figure out where in the model object
-# our parameters of interest: autoregressive, cross-lagged, and residual correlation (rho) are located
-# this file contains functions to extract those parameters from the fitted model objects
+# Since all fits are slightly different, we need to figure out where in the model object
+# our parameters of interest: autoregressive (betas), cross-lagged (gammas), and residual correlation (rho) are located
+# 
+# Currently, the functions are equiped to extract parameters from:
+# - CLPM
+# - RI-CLPM
+# - DPM
 # ------------------------------------------------------------------------------------------------
 
 # lagged parameters extractor

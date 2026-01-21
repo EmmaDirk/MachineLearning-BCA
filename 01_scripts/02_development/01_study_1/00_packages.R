@@ -5,7 +5,7 @@
 # required packages
 pkgs <- c("mvtnorm", "lavaan", "tidyverse", "here", 
           "parallel", "pbapply", "ggh4x", 
-          "colorspace", "patchwork", "viridis")
+          "patchwork", "viridis")
 
 # load packages
 lapply(pkgs, library, character.only = TRUE)

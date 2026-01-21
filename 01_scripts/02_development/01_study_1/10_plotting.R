@@ -1,4 +1,25 @@
-# script to create the plots for simulation study 1
+# This function takes the combined simulation output (results_sim) and the true 2x2 data-generating
+# lag matrix (true_A), then produces summary performance plots for the cross-lagged X->Y effect:
+# - Relative bias over time (with Monte Carlo SE error bars)
+# - RMSE over time (with Monte Carlo SE error bars)
+#
+# Naming logic used throughout:
+# - autoregressive effects are denoted beta:
+#     beta_X = A[1,1] (X_t-1 -> X_t)
+#     beta_Y = A[2,2] (Y_t-1 -> Y_t)
+# - cross-lagged effects are denoted gamma:
+#     gamma_XY = A[2,1] (X_t-1 -> Y_t)
+#     gamma_YX = A[1,2] (Y_t-1 -> X_t)
+#
+# What the function does:
+# 1) Builds a small "true_params" lookup table mapping each estimand (gamma_XY, gamma_YX, beta_X, beta_Y) to its true value.
+# 2) Reshapes the simulation output from wide to long format for all lagged estimates (occasion >= 2).
+# 3) Parses column names to identify which estimand (beta/gamma) and which method (CLPM, RI-CLPM, DPM, etc.) produced each estimate.
+# 4) Computes, per scenario × occasion × estimand × method:
+#    - relative bias and its Monte Carlo SE
+#    - RMSE and its Monte Carlo SE
+# 5) Creates two ggplots for gamma_XY (X -> Y): one for relative bias and one for RMSE, faceted by scenario.
+# 6) Returns the plots plus the underlying summary data frames and the method colour palette.
 # -----------------------------------------------------------------------------
 
 plot_sim_study_results <- function(results_sim, true_A) {
@@ -8,12 +29,12 @@ plot_sim_study_results <- function(results_sim, true_A) {
   #####################################################
 
   true_params <- tibble(
-    estimand = c("XY", "YX", "AX", "AY"),
+    estimand = c("gamma_XY", "gamma_YX", "beta_X", "beta_Y"),
     true     = c(
-      true_A[2, 1],  # XY
-      true_A[1, 2],  # YX
-      true_A[1, 1],  # AX
-      true_A[2, 2]   # AY
+      true_A[2, 1],  # gamma_XY: X -> Y
+      true_A[1, 2],  # gamma_YX: Y -> X
+      true_A[1, 1],  # beta_X: X -> X
+      true_A[2, 2]   # beta_Y: Y -> Y
     )
   )
 
@@ -28,7 +49,7 @@ plot_sim_study_results <- function(results_sim, true_A) {
 
     # reshape estimates to long format
     pivot_longer(
-      cols = matches("^est(XY|YX|A|AY)_"),
+      cols = matches("^est(BetaX|BetaY|GammaXY|GammaYX)_"),
       names_to  = "param",
       values_to = "estimate"
     ) %>%
@@ -39,14 +60,14 @@ plot_sim_study_results <- function(results_sim, true_A) {
     # identify estimand type and method
     mutate(
       estimand = case_when(
-        str_detect(param, "^estXY_") ~ "XY",
-        str_detect(param, "^estYX_") ~ "YX",
-        str_detect(param, "^estA_")  ~ "AX",
-        str_detect(param, "^estAY_") ~ "AY"
+        str_detect(param, "^estGammaXY_") ~ "gamma_XY",
+        str_detect(param, "^estGammaYX_") ~ "gamma_YX",
+        str_detect(param, "^estBetaX_")   ~ "beta_X",
+        str_detect(param, "^estBetaY_")   ~ "beta_Y"
       ),
 
       method = param %>%
-        str_remove("^est(XY|YX|A|AY)_") %>%
+        str_remove("^est(BetaX|BetaY|GammaXY|GammaYX)_") %>%
         recode(
           CLPM      = "CLPM",
           CLPM_Adj  = "True model",
@@ -105,11 +126,11 @@ plot_sim_study_results <- function(results_sim, true_A) {
   names(pal_method) <- levels(relbias_df$method)
 
   #####################################################
-  # Plot 1: cross-lagged effect of X on Y (XY)
+  # Plot 1: cross-lagged effect of X on Y (gamma_XY)
   #####################################################
 
-  plot_relbias_XY <- relbias_df %>%
-    filter(estimand == "XY") %>%
+  plot_relbias_gamma_XY <- relbias_df %>%
+    filter(estimand == "gamma_XY") %>%
 
     ggplot(aes(
       x     = occasion,
@@ -169,18 +190,8 @@ plot_sim_study_results <- function(results_sim, true_A) {
   # Build RMSE data for all lagged parameters
   #####################################################
 
-  # true parameters from the data-generating model
-  true_params <- tibble(
-    estimand = c("XY", "YX", "AX", "AY"),
-    true     = c(
-      true_A[2, 1],  # XY
-      true_A[1, 2],  # YX (true = 0)
-      true_A[1, 1],  # AX
-      true_A[2, 2]   # AY
-    )
-  )
+  # (reuse true_params defined above)
 
-  # build RMSE data frame
   rmse_df <- results_sim %>%
 
     # only occasions with lagged parameters
@@ -188,7 +199,7 @@ plot_sim_study_results <- function(results_sim, true_A) {
 
     # reshape estimates to long format
     pivot_longer(
-      cols = matches("^est(XY|YX|A|AY)_"),
+      cols = matches("^est(BetaX|BetaY|GammaXY|GammaYX)_"),
       names_to  = "param",
       values_to = "estimate"
     ) %>%
@@ -199,14 +210,14 @@ plot_sim_study_results <- function(results_sim, true_A) {
     # identify estimand type and method
     mutate(
       estimand = case_when(
-        str_detect(param, "^estXY_") ~ "XY",
-        str_detect(param, "^estYX_") ~ "YX",
-        str_detect(param, "^estA_")  ~ "AX",
-        str_detect(param, "^estAY_") ~ "AY"
+        str_detect(param, "^estGammaXY_") ~ "gamma_XY",
+        str_detect(param, "^estGammaYX_") ~ "gamma_YX",
+        str_detect(param, "^estBetaX_")   ~ "beta_X",
+        str_detect(param, "^estBetaY_")   ~ "beta_Y"
       ),
 
       method = param %>%
-        str_remove("^est(XY|YX|A|AY)_") %>%
+        str_remove("^est(BetaX|BetaY|GammaXY|GammaYX)_") %>%
         recode(
           CLPM      = "CLPM",
           CLPM_Adj  = "True model",
@@ -265,11 +276,11 @@ plot_sim_study_results <- function(results_sim, true_A) {
   names(pal_method) <- levels(rmse_df$method)
 
   #####################################################
-  # Plot 1: cross-lagged effect of X on Y (XY)
+  # Plot 2: RMSE for cross-lagged effect of X on Y (gamma_XY)
   #####################################################
 
-  plot_rmse_XY <- rmse_df %>%
-    filter(estimand == "XY") %>%
+  plot_rmse_gamma_XY <- rmse_df %>%
+    filter(estimand == "gamma_XY") %>%
 
     ggplot(aes(
       x     = occasion,
@@ -308,21 +319,21 @@ plot_sim_study_results <- function(results_sim, true_A) {
   # create legendless plots
   #####################################################
 
-  plot_relbias_XY_noleg <- plot_relbias_XY +
+  plot_relbias_gamma_XY_noleg <- plot_relbias_gamma_XY +
     theme(legend.position = "none")
 
   #####################################################
   # combine the two
   #####################################################
 
-  combined_XY <- plot_relbias_XY_noleg / plot_rmse_XY
+  combined_gamma_XY <- plot_relbias_gamma_XY_noleg / plot_rmse_gamma_XY
 
   return(list(
-    combined_XY        = combined_XY,
-    plot_relbias_XY    = plot_relbias_XY,
-    plot_rmse_XY       = plot_rmse_XY,
-    relbias_df         = relbias_df,
-    rmse_df            = rmse_df,
-    pal_method         = pal_method
+    combined_gamma_XY        = combined_gamma_XY,
+    plot_relbias_gamma_XY    = plot_relbias_gamma_XY,
+    plot_rmse_gamma_XY       = plot_rmse_gamma_XY,
+    relbias_df               = relbias_df,
+    rmse_df                  = rmse_df,
+    pal_method               = pal_method
   ))
 }

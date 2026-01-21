@@ -1,6 +1,8 @@
-# we want our models to adapt to the number of time points T, and since those models are strings
-# we will need to built them using text manipulation
-# this is a collection of functions building the following models:
+# These functions build the lavaan model strings for the different models we want to fit.
+# This needs to be done to adapt the models to the number of time points T.
+# As such we use text manipulation to create the model strings dynamically.
+#
+# The functions build the following models:
 # - CLPM without confounder adjustment
 # - CLPM with direct confounder adjustment
 # - RI-CLPM with indirect confounder adjustment via random intercepts

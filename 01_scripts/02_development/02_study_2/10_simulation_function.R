@@ -72,7 +72,7 @@ run_simulation_study <- function(
     results_list <- lapply(
       X = 1:reps,
       FUN = function(rep_id) {
-        run_1_rep_study(
+        run_one_rep_study(
           rep_id        = rep_id,
           N             = N,
           T             = T,
@@ -107,7 +107,6 @@ run_simulation_study <- function(
   parallel::clusterExport(
     cl,
     c(
-      "n_interactions_from_k",
       "simulate_panel_data_int",
 
       "build_clpm",
@@ -143,7 +142,7 @@ run_simulation_study <- function(
     X  = 1:reps,
     cl = cl,
     FUN = function(rep_id) {
-      run_one_rep_study(
+      run_1_rep_study(
         rep_id        = rep_id,
         N             = N,
         T             = T,

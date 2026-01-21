@@ -1,11 +1,37 @@
+# This function runs the full simulation study by repeatedly calling run_one_rep_study() across replications,
+# either sequentially (single core) or in parallel (multiple cores).
+#
+# 1) It determines how many CPU cores to use:
+# - if cores is NULL, it defaults to detectCores()/2 (at least 1)
+# - if cores == 1, it runs everything sequentially via lapply()
+#
+# 2) If running sequentially (cores == 1):
+# - for rep_id = 1..reps, it calls run_one_rep_study() with the provided settings
+# - it row-binds the per-replication outputs into one combined results data frame
+#
+# 3) If running in parallel (cores > 1):
+# - it creates a PSOCK cluster with the requested number of workers
+# - it initializes reproducible random number streams on the cluster (clusterSetRNGStream with base_seed)
+# - it loads required packages on each worker (lavaan, mvtnorm)
+# - it exports all functions and objects needed by the workers (including D_scenarios and model settings)
+#
+# 4) It distributes replications across workers:
+# - it uses pbapply::pblapply() to run rep_id = 1..reps in parallel with a progress bar
+# - each worker calls run_one_rep_study(), which handles scenario checks, data simulation, model fitting, and extraction
+#
+# 5) It finalizes and returns results:
+# - it stops the cluster to free resources
+# - it row-binds all replication outputs into a single results data frame and returns it
+# ------------------------------------------------------------------------------------------------------------
+
 run_simulation_study <- function(
   reps,                                                                    # number of replications
   N,                                                                       # sample size
   T,                                                                       # number of waves
   k,                                                                       # number of confounders
   scenarios,                                                               # e.g., c("constant","stepwise")
-  B_scenarios,                                                             # named list of beta trajectories
-  A,                                                                       # 2×2 AR + cross-lag matrix
+  D_scenarios,                                                             # named list of delta trajectories
+  A,                                                                       # 2×2 autoregressive (beta) + cross-lagged (gamma) matrix
   Psi,                                                                     # k×k confounder covariance
   rho_extra,                                                               # extra covariance added to observations
   models_to_run,                                                           # c("clpm","riclpm","dpm","adj","lbca")
@@ -16,22 +42,29 @@ run_simulation_study <- function(
 
   # choose number of cores
   if (is.null(cores)) {
+
+    # detect and use half of available cores if not specified
     cores <- max(1, floor(parallel::detectCores() / 2))
   }
 
   # run sequentially if cores is 1
   if (cores == 1L) {
-
+    
+    # run sequentially
     results_list <- lapply(
+
+      # replications
       X = 1:reps,
       FUN = function(rep_id) {
+
+        # one replication
         run_one_rep_study(
           rep_id        = rep_id,
           N             = N,
           T             = T,
           k             = k,
           scenarios     = scenarios,
-          B_scenarios   = B_scenarios,
+          D_scenarios   = D_scenarios,
           A             = A,
           Psi           = Psi,
           rho_extra     = rho_extra,
@@ -42,9 +75,11 @@ run_simulation_study <- function(
       }
     )
 
+    # bind and return
     return(dplyr::bind_rows(results_list))
   }
 
+  # otherwise, run in parallel
   # make the cluster
   cl <- parallel::makeCluster(cores)
 
@@ -76,7 +111,7 @@ run_simulation_study <- function(
       "extract_rho_vec",
       "residualise_panel_linearC",
       "run_one_rep_study",
-      "N","T","k","scenarios","B_scenarios",
+      "N","T","k","scenarios","D_scenarios",
       "A","Psi","rho_extra","models_to_run","base_seed","ci_level"
     ),
     envir = environment()
@@ -93,7 +128,7 @@ run_simulation_study <- function(
         T             = T,
         k             = k,
         scenarios     = scenarios,
-        B_scenarios   = B_scenarios,
+        D_scenarios   = D_scenarios,
         A             = A,
         Psi           = Psi,
         rho_extra     = rho_extra,

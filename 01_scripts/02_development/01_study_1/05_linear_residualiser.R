@@ -1,5 +1,6 @@
-# function that residualises replaces x and y columns in a data frame
-# by their residuals after regressing out confounders c1...ck
+# For BCA (Baseline Covariate Adjustment) in panel data, we need to residualise each observed variable at each time point.
+# Concretely, we fit the models: x_t ~ f(U) + e, and y_t ~ f(U) + e, where U are the baseline confounders with linear effects. 
+# We then replace the observed x_t with e (the residuals), and similarly for y_t. 
 # --------------------------------------------------------------------------------
 
 residualise_panel_linearC <- function(df,

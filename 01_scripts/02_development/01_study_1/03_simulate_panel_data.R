@@ -1,22 +1,25 @@
-# this function simulates panel data under a CLPM data-generating process, where 
-# 1) we simulate the confounders first for each wave, based on the given Psi covariance matrix
-# 2) we compute the variance these confounders induce at each wave given the B matrix for that wave
-# 3) we compute how much variance must then be induced by the dynamic process to reach the target covariance 
-# 4) however, we want some extra covariance between X and Y at each occasion, meaning that we need to first compute
-#    the implied covariance at each wave, and then add this extra covariance to the target covariance at each wave
-# 5) calculate the innovations covariance needed to reach this target covariance at each wave
-# 6) simulate the panel data panel data for each wave using these innovations
-#    then adding the lagged effects from A and the direct confounder effects from B
-# 7) repeat for T waves with varying B matrices
+# This function simulates panel data under a CLPM (cross-lagged panel model) data-generating process:
+# its goal is to produce data for two observed variables (X and Y) measured over T waves for N individuals,
+# where X and Y are confounded by a time-invariant set of confounders U.
+# It aims to achieve an observed variance of 1 for all variables, such that the effects can be interpreted as standardized effects.
+#
+# We take the following steps: 
+# 1) simulate time-invariant confounders U for N individuals from a multivariate normal distribution with covariance matrix Psi
+# 2) for each wave t, use the wave-specific delta matrix D_t to compute the confounder-induced covariance: S_U_t = D_t Psi D_t'
+# 3) determine the stationary covariance between X and Y implied by the system (given A and S_U_t), assuming uncorrelated innovations
+# 4) add extra observed-level covariance (rho_extra) to obtain the final target covariance of X and Y at wave t. This will show up as residual covariance in the CLPM. 
+# 5) compute the remaining covariance that must come from the dynamic component: S_dyn_t = S_target_t - S_U_t
+# 6) derive the innovation covariance Sigma_e_t that makes the process stationary at wave t
+# 7) simulate (X_t, Y_t) over T waves by iterating the dynamic system via A and adding direct confounder effects via D_t
 # ------------------------------------------------------------------------------------------------------------
 
 simulate_panel_data <- function(
     N,                                                         # number of individuals
     T,                                                         # number of waves
     A,                                                         # 2x2 autoregressive/cross-lag matrix
-    B_list,                                                    # list of B matrices: B_list[[t]] is 2 x k
+    D_list,                                                    # list of D matrices: D_list[[t]] is 2 x k
     Psi,                                                       # k x k confounder covariance matrix
-    rho_extra,                                                 # extra covariance to add at observed level
+    rho_extra,                                                 # extra covariance to add at observed level. 
     seed = NULL                                                # optional random seed for reproducibility
 ){
 
@@ -65,10 +68,11 @@ simulate_panel_data <- function(
       error = function(e) NA_real_
     )
 
+    # return the found covariance c
     out
   }
 
-  # set seed if provided
+  # set seed, and use the supplied seed if there is one
   if (!is.null(seed)) set.seed(seed)
 
   # number of confounders
@@ -93,11 +97,11 @@ simulate_panel_data <- function(
   # for each wave t from 1 to T
   for (t in 1:T) {
 
-    # get the B matrix for this wave
-    B_t <- B_list[[t]]
+    # get the D matrix for this wave
+    D_t <- D_list[[t]]
 
-    # the confounder induced variance covariance at this wave is B_t Psi B_t'
-    S_U_t <- B_t %*% Psi %*% t(B_t)
+    # the confounder induced variance covariance at this wave is D_t Psi D_t'
+    S_U_t <- D_t %*% Psi %*% t(D_t)
 
     # the base covariance can be found (if the innovations are uncorrelated) by calling find_c
     c_base_t <- find_c(A, S_U_t)
@@ -159,7 +163,7 @@ simulate_panel_data <- function(
   ) 
 
   # add the direct confounder effects
-  obs1 <- Ddyn + U %*% t(B_list[[1]])
+  obs1 <- Ddyn + U %*% t(D_list[[1]])
 
   # store in dataframe
   df[, "x1"] <- obs1[, 1]
@@ -175,12 +179,13 @@ simulate_panel_data <- function(
     Ddyn <- Ddyn %*% t(A) + mvtnorm::rmvnorm(N, sigma = Sigma_e_t)
 
     # add direct confounder effects
-    obs <- Ddyn + U %*% t(B_list[[t]])
+    obs <- Ddyn + U %*% t(D_list[[t]])
 
     # store
     df[, paste0("x", t)] <- obs[, 1]
     df[, paste0("y", t)] <- obs[, 2]
   }
 
+  # return the simulated data frame
   return(df)
 }

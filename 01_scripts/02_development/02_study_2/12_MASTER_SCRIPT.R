@@ -102,7 +102,7 @@ results_sim <- run_simulation_study(
 # step 7: save the results 
 saveRDS(
   results_sim,
-  file = here::here("02_data", "01_research_report","study_1_RR_results.rds")
+  file = here::here("02_data", "01_research_report","study_2_RR_results.rds")
 )
 
 # step 8: produce the plot
@@ -120,7 +120,7 @@ print(p$combined_XY)
 
 # save the plot
 ggsave(
-  filename = here::here("03_output", "01_latest", "RR_study_1.png"),
+  filename = here::here("03_output", "01_latest", "RR_study_2.png"),
   plot     = p$combined_XY,
   width    = 10,
   height   = 8,
