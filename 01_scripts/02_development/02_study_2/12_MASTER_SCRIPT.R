@@ -1,4 +1,13 @@
-# this script serves to call all other scripts and produce the resulting plot in the output folder
+# This master script runs simulation study 2 end-to-end and saves both the raw results and the main plot.
+#
+# 1) It loads packages and helper functions from the study_2 script folder.
+# 2) It samples an initial confounder-effect matrix (delta matrix at t = 1) and builds two delta trajectories:
+# - constant over time
+# - stepwise change at a chosen wave
+# 3) It defines the data-generating autoregressive + cross-lagged structure (A) and the confounder covariance (Psi).
+# 4) It sources the simulation, model-building, residualising, fitting, tuning, and extraction functions.
+# 5) It runs run_simulation_study() over replications (optionally parallel), producing one combined results data frame.
+# 6) It saves the results as an .rds file and creates/saves the main plot in the output folder.
 # ----------------------------------------------------------------------------------------------------------------
 
 # load here package to manage file paths
@@ -7,52 +16,54 @@ library(here)
 # set seed for reproducibility
 set.seed(1234)
 
+# set a fast xgboost profile for quick runs
+XGB_PROFILE <- "quick"
+
 # step 0: load the required packages
 source(here("01_scripts", "02_development", "02_study_2", "00_packages.R"))
 
-# step 1: sample a beta-matrix
-# get the function to sample the beta-matrix
+# step 1: sample a delta matrix (confounder effects at t = 1)
+# get the function to sample the delta matrix
 source(here("01_scripts", "02_development", "02_study_2", "01_beta_sampler.R"))
 
-# sample B1 matrix
-B1 <- sample_B1(
+# sample D1 matrix
+D1 <- sample_B1(
   k = 3,                                               # number of confounders
-  R2_1 = 0.15,                                         # total confounder R2 at time t = 1 
-  min_abs = 0.001,                                     # minimum absolute value for each beta
-  max_abs = 0.40,                                      # maximum absolute value for each beta
-  eta_1 = 0.1                                         # fraction of R2_1 allocated to non-linear terms
+  R2_1 = 0.15,                                         # total confounder R2 at time t = 1
+  min_abs = 0.001,                                     # minimum absolute value for each coefficient
+  max_abs = 0.40,                                      # maximum absolute value for each coefficient
+  eta_1 = 0.1                                          # fraction of R2_1 allocated to non-linear terms
 )
 
-# step 2: make a beta trajectory from the sampled beta-matrix
-# get the function to make the beta trajectory
+# step 2: make delta trajectories from the sampled delta matrix
+# get the function to make the delta trajectory
 source(here("01_scripts", "02_development", "02_study_2", "02_beta_trajectory.R"))
 
-# make a constant beta trajectory over 5 time points
-B_list_constant <- generate_B_constant(
-  B1 = B1,                                             # initial beta matrix
+# make a constant delta trajectory over 5 time points
+D_list_constant <- generate_B_constant(
+  B1 = D1,                                             # initial delta matrix
   T = 5                                                # number of time points
 )
 
-# make a stepwise beta trajectory over 5 time points
-B_list_stepwise <- generate_B_stepwise(
-  B1     = B1,                                         # initial beta matrix
-  T      = 5,                                          # number of time points
+# make a stepwise delta trajectory over 5 time points
+D_list_stepwise <- generate_B_stepwise(
+  B1      = D1,                                        # initial delta matrix
+  T       = 5,                                         # number of time points
   step_at = 4,                                         # time point at which to step
-  old_R2 = 0.15,                                       # old R2 before the step
-  new_R2 = 0.40                                        # new R2 after the step
+  old_R2  = 0.15,                                      # old R2 before the step
+  new_R2  = 0.40                                       # new R2 after the step
 )
 
-# step 3: define the true matrix
-# autoregressive + cross-lag structure
+# step 3: define the true A matrix (beta = autoregressive, gamma = cross-lagged)
 A <- matrix(c(
-  0.20, 0,                         # autoregressive and cross-lag for Y
-  0.10, 0.20                       # cross-lag and autoregressive for X
+  0.20, 0.00,                                          # BetaX,  GammaYX
+  0.10, 0.20                                           # GammaXY, BetaY
 ), nrow = 2, byrow = TRUE)
 
 # step 4: define the confounder covariance matrix
-Psi <- diag(3)                     # uncorrelated confounders with var=1
+Psi <- diag(3)                                         # uncorrelated confounders with var=1
 
-# step 5: call all the functions that the simulation function (09) needs
+# step 5: call all the functions that the simulation function needs
 source(here("01_scripts", "02_development", "02_study_2", "03_simulate_panel_data.R"))
 source(here("01_scripts", "02_development", "02_study_2", "04_lavaan_model_string_builder.R"))
 source(here("01_scripts", "02_development", "02_study_2", "05_residualisers.R"))
@@ -60,22 +71,19 @@ source(here("01_scripts", "02_development", "02_study_2", "06_model_fitters.R"))
 source(here("01_scripts", "02_development", "02_study_2", "07_model_tuners.R"))
 source(here("01_scripts", "02_development", "02_study_2", "08_fit_stat_extractors.R"))
 source(here("01_scripts", "02_development", "02_study_2", "09_one_replication_wrapper.R"))
-
-# step 6: run the simulation study function
-# get the function to run the full simulation study
 source(here("01_scripts", "02_development", "02_study_2", "10_simulation_function.R"))
+source(here("01_scripts", "02_development", "02_study_2", "11_plotting.R"))
 
-# run the simulation study
-# run a small example simulation study
+# step 6: run the simulation study
 results_sim <- run_simulation_study(
   reps        = 20,                                    # replications
   N           = 100,                                   # sample size
   T           = 5,                                     # number of time points
   k           = 3,                                     # number of confounders
-  scenarios   = c("constant", "stepwise"),             # B scenarios
-  B_scenarios = list(                                  # beta trajectories
-    constant = B_list_constant,
-    stepwise = B_list_stepwise
+  scenarios   = c("constant", "stepwise"),             # delta scenarios
+  D_scenarios = list(                                  # delta trajectories
+    constant = D_list_constant,
+    stepwise = D_list_stepwise
   ),
   A           = A,                                     # autoregressive + cross-lag matrix
   Psi         = Psi,                                   # confounder covariance matrix
@@ -96,32 +104,33 @@ results_sim <- run_simulation_study(
   ###########################################################################
 
   cores       = parallel::detectCores() - 1,           # number of cores for parallel processing
-  base_seed   = 1234                                   # base seed for reproducibility
+  base_seed   = 1234,                                  # base seed for reproducibility
+
+  # xgb tuning / profile
+  tune_xgb    = TRUE,                                  # tune once on a pilot dataset
+  xgb_tuned   = NULL,                                  # optionally pass a tuned object directly instead
+  xgb_profile = XGB_PROFILE                            # quick profile for fast runs
 )
 
-# step 7: save the results 
+# step 7: save the results
 saveRDS(
   results_sim,
-  file = here::here("02_data", "01_research_report","study_2_RR_results.rds")
+  file = here::here("02_data", "01_research_report", "study_2_RR_results.rds")
 )
 
 # step 8: produce the plot
-# get the plotting function
-source(here("01_scripts", "02_development", "02_study_2", "11_plotting.R"))
-
-# produce the plot
 p <- plot_sim_study_results(
   results_sim = results_sim,
   true_A      = A
 )
 
 # print the plot
-print(p$combined_XY)
+print(p$combined_GammaXY)
 
 # save the plot
 ggsave(
   filename = here::here("03_output", "01_latest", "RR_study_2.png"),
-  plot     = p$combined_XY,
+  plot     = p$combined_GammaXY,
   width    = 10,
   height   = 8,
   dpi      = 300

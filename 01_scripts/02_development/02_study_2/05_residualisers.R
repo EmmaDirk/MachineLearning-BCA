@@ -1,12 +1,14 @@
-# function that residualises replaces x and y columns in a data frame
-# by their residuals after regressing out confounders c1...ck
+# For BCA (Baseline Covariate Adjustment) in panel data, we need to residualise each observed variable at each time point.
+# Concretely, we fit the models: x_t ~ f(U) + e, and y_t ~ f(U) + e, where U are the baseline confounders with linear effects. 
+# We then replace the observed x_t with e (the residuals), and similarly for y_t. 
+#
+# We use two functions for F(U). 
+# - residualise_panel_linearC() uses a linear regression model (only using the linear confounders)
+# - residualise_panel_xgb() uses an XGBoost model (using only the linear confounders, but can capture non-linear relationships)
 # --------------------------------------------------------------------------------
 
-# this function is doing the exact same as a linearly adjusted CLPM, but instead of including the confounders in the model,
-# we decouple the confounder adjustment from the model fitting by residualising all X and Y variables against the confounders
-# this is called Baseline Covariate Adjustment (BCA)
+# linear residualiser
 residualise_panel_linearC <- function(df,
-                                      k,
                                       x_prefix = "x",
                                       y_prefix = "y",
                                       c_prefix = "c") {
@@ -15,19 +17,13 @@ residualise_panel_linearC <- function(df,
   df <- as.data.frame(df)
   
   # get column names
-  x_cols <- grep(paste0("^", x_prefix, "\\d+$"), names(df), value = TRUE)
-  y_cols <- grep(paste0("^", y_prefix, "\\d+$"), names(df), value = TRUE)
-
-  # IMPORTANT: only use linear confounders (c1 ... ck)
-  c_cols <- paste0(c_prefix, 1:k)
+  x_cols <- grep(paste0("^", x_prefix, "\\d+$"), names(df), value=TRUE)
+  y_cols <- grep(paste0("^", y_prefix, "\\d+$"), names(df), value=TRUE)
+  c_cols <- grep(paste0("^", c_prefix, "\\d+$"), names(df), value=TRUE)
 
   # stop if no confounders found
   if (length(c_cols) == 0)
     stop("No confounder columns found.")
-
-  # stop if some confounders are missing
-  if (any(!c_cols %in% names(df)))
-    stop("Not all linear confounder columns found (c1..ck).")
 
   # convert confounders to matrix
   C <- as.matrix(df[c_cols])
@@ -46,10 +42,7 @@ residualise_panel_linearC <- function(df,
   df
 }
 
-# now we want to also add a model that can deal with the non-linear relationships
-# between the confounders and the outcome variables. This will be an Extreme Gradient Boosting Xgb model
-# note that the model still only 'sees' the linear confounders, but since those are deterministically related 
-# to the non-linear confounders, the Xgb model can in theory learn these non-linear relationships
+# XGB residualiser
 residualise_panel_xgb <- function(df,
                                   k,
                                   x_prefix = "x",
@@ -77,15 +70,19 @@ residualise_panel_xgb <- function(df,
   if (!exists("XGB_TUNED", inherits = TRUE) || is.null(XGB_TUNED))
     stop("XGB_TUNED not found. Tune once before calling residualise_panel_xgb().")
 
-  # (CHANGED) expect separate tuned settings for X and Y
+  # expect separate tuned settings for X and Y
+  # i.e. we use double xgb tuning: once for X's, once for Y's. If one model is correct, we are already good. 
   if (is.null(XGB_TUNED$params_X) || is.null(XGB_TUNED$nrounds_X) ||
       is.null(XGB_TUNED$params_Y) || is.null(XGB_TUNED$nrounds_Y)) {
     stop("XGB_TUNED must contain params_X/nrounds_X and params_Y/nrounds_Y. Re-run tune_xgb_once().")
   }
 
+  # pull tuned settings
+  # for X's
   nrounds_X <- XGB_TUNED$nrounds_X
   params_X  <- XGB_TUNED$params_X
 
+  # for Y's
   nrounds_Y <- XGB_TUNED$nrounds_Y
   params_Y  <- XGB_TUNED$params_Y
 
@@ -97,20 +94,34 @@ residualise_panel_xgb <- function(df,
 
     # fit
     fit <- xgboost::xgb.train(
+
+      # data
       data = dtrain,
+
+      # number of rounds and parameters
       nrounds = nrounds_tuned,
+
+      # fixed + tuned parameters
       params = c(
         list(
+
+          # objective and evaluation
           objective = "reg:squarederror",
           eval_metric = "rmse",
+
+          # tree settings
           booster   = "gbtree",
           tree_method = "hist",
 
           # avoid oversubscribing CPU when the main simulation is parallel
           nthread = 1
         ),
+
+        # tuned parameters
         params_tuned
       ),
+
+      # silent
       verbose = 0
     )
 

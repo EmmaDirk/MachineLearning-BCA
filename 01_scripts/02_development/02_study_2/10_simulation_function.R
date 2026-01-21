@@ -1,6 +1,36 @@
 # this script runs the wrapper function that executes one replication of the simulation study
 # adding a progress bar and parallelization
-# ------------------------------------------------------------------------------------------------
+#
+# This function runs the full simulation study by repeatedly calling run_one_rep_study() across replications,
+# either sequentially (single core) or in parallel (multiple cores).
+#
+# 1) It determines how many CPU cores to use:
+# - if cores is NULL, it defaults to detectCores()/2 (at least 1)
+# - if cores == 1, it runs everything sequentially via lapply()
+#
+# 2) It handles one-time XGB tuning (only if requested):
+# - if "xgb" is in models_to_run and xgb_tuned is NULL and tune_xgb is TRUE, it tunes once on a pilot dataset
+# - the pilot dataset is simulated from the first scenario using base_seed + 1
+# - the tuned object is stored in xgb_tuned and passed into run_one_rep_study()
+#
+# 3) If running sequentially (cores == 1):
+# - for rep_id = 1..reps, it calls run_one_rep_study() with the provided settings (including xgb_tuned)
+# - it row-binds the per-replication outputs into one combined results data frame
+#
+# 4) If running in parallel (cores > 1):
+# - it creates a PSOCK cluster with the requested number of workers
+# - it initializes reproducible random number streams on the cluster (clusterSetRNGStream with base_seed)
+# - it loads required packages on each worker (lavaan, mvtnorm, xgboost)
+# - it exports all functions and objects needed by the workers (including D_scenarios, model settings, and xgb_tuned)
+#
+# 5) It distributes replications across workers:
+# - it uses pbapply::pblapply() to run rep_id = 1..reps in parallel with a progress bar
+# - each worker calls run_one_rep_study(), which handles scenario checks, data simulation, model fitting, and extraction
+#
+# 6) It finalizes and returns results:
+# - it stops the cluster to free resources
+# - it row-binds all replication outputs into a single results data frame and returns it
+# ------------------------------------------------------------------------------------------------------------
 
 run_simulation_study <- function(
   reps,                                                                    # number of replications
@@ -8,14 +38,16 @@ run_simulation_study <- function(
   T,                                                                       # number of waves
   k,                                                                       # number of linear confounders
   scenarios,                                                               # e.g., c("constant","stepwise")
-  B_scenarios,                                                             # user-supplied B matrices per scenario
+  D_scenarios,                                                             # user-supplied delta matrices per scenario
   A,                                                                       # 2×2 AR + cross-lag matrix
   Psi,                                                                     # k×k confounder covariance
   rho_extra,                                                               # extra covariance added to observations
   models_to_run,                                                           # c("clpm","riclpm","dpm","adj","lbca","xgb")
   cores = NULL,                                                            # default is detectCores()/2
   base_seed = 1234,                                                        # master seed for reproducible reps
-  ci_level = 0.95                                                          # CI level for extracted parameters
+  ci_level = 0.95,                                                         # CI level for extracted parameters
+  xgb_tuned = NULL,                                                        # optionally provide a tuned object directly
+  tune_xgb = TRUE                                                          # if TRUE and xgb_tuned is NULL, tune once on a pilot dataset
 ) {
 
   # if cores is not specified, detect and use half of available cores
@@ -23,8 +55,8 @@ run_simulation_study <- function(
     cores <- max(1, floor(parallel::detectCores() / 2))
   }
 
-  # XGB one-time tuning for this study
-  if ("xgb" %in% models_to_run) {
+  # one-time XGB tuning for this study (optional)
+  if ("xgb" %in% models_to_run && is.null(xgb_tuned) && isTRUE(tune_xgb)) {
 
     # pick a pilot scenario for tuning
     scen_tune <- scenarios[1]
@@ -32,38 +64,31 @@ run_simulation_study <- function(
     # set seed for the pilot
     set.seed(base_seed + 1)
 
-    # check B_scenarios is a named list and contains the pilot scenario
-    if (!is.list(B_scenarios) || is.null(names(B_scenarios)) || !scen_tune %in% names(B_scenarios))
-      stop("For xgb tuning, B_scenarios must be a named list containing the first scenario name.")
+    # check D_scenarios is a named list and contains the pilot scenario
+    if (!is.list(D_scenarios) || is.null(names(D_scenarios)) || !scen_tune %in% names(D_scenarios))
+      stop("For xgb tuning, D_scenarios must be a named list containing the first scenario name.")
 
-    # take the pilot B trajectory
-    B_list_pilot <- B_scenarios[[scen_tune]]
+    # take the pilot delta trajectory
+    D_list_pilot <- D_scenarios[[scen_tune]]
 
     # check pilot trajectory is a list of length T
-    if (!is.list(B_list_pilot))
-      stop("For xgb tuning, B_scenarios[['", scen_tune, "']] must be a list of length T.")
-    if (length(B_list_pilot) != T)
-      stop("For xgb tuning, B_scenarios[['", scen_tune, "']] has length ", length(B_list_pilot), " but T = ", T, ".")
+    if (!is.list(D_list_pilot))
+      stop("For xgb tuning, D_scenarios[['", scen_tune, "']] must be a list of length T.")
+    if (length(D_list_pilot) != T)
+      stop("For xgb tuning, D_scenarios[['", scen_tune, "']] has length ", length(D_list_pilot), " but T = ", T, ".")
 
     # simulate pilot data
     df_pilot <- simulate_panel_data_int(
       N         = N,
       T         = T,
       A         = A,
-      B_list    = B_list_pilot,
+      B_list    = D_list_pilot,   # simulate_panel_data_int uses B_list as argument name
       Psi       = Psi,
       rho_extra = rho_extra
     )
 
-    # tune and store for residualise_panel_xgb
-    XGB_TUNED <- tune_xgb_once(df_pilot, k)
-    assign("XGB_TUNED", XGB_TUNED, envir = .GlobalEnv)
-
-  } else {
-
-    # set tuning object to NULL if xgb is not used
-    XGB_TUNED <- NULL
-    assign("XGB_TUNED", XGB_TUNED, envir = .GlobalEnv)
+    # tune and store locally for passing into run_one_rep_study
+    xgb_tuned <- tune_xgb_once(df_pilot, k)
   }
 
   # run sequentially if cores is 1
@@ -78,13 +103,14 @@ run_simulation_study <- function(
           T             = T,
           k             = k,
           scenarios     = scenarios,
-          B_scenarios   = B_scenarios,
+          D_scenarios   = D_scenarios,
           A             = A,
           Psi           = Psi,
           rho_extra     = rho_extra,
           models_to_run = models_to_run,
           base_seed     = base_seed,
-          ci_level      = ci_level
+          ci_level      = ci_level,
+          xgb_tuned     = xgb_tuned
         )
       }
     )
@@ -94,6 +120,9 @@ run_simulation_study <- function(
 
   # make the cluster
   cl <- parallel::makeCluster(cores)
+
+  # initialize reproducible RNG streams on the cluster
+  parallel::clusterSetRNGStream(cl, iseed = base_seed)
 
   # load packages on each worker
   parallel::clusterEvalQ(cl, {
@@ -108,31 +137,13 @@ run_simulation_study <- function(
     cl,
     c(
       "simulate_panel_data_int",
+      "tune_xgb_once",
 
-      "build_clpm",
-      "build_riclpm",
-      "build_dpm",
-      "build_clpm_with_Cs",
+      "run_one_rep_study",
 
-      "residualise_panel_linearC",
-      "residualise_panel_xgb",
-
-      "safe_fit_clpm",
-      "safe_fit_riclpm",
-      "safe_fit_dpm",
-      "safe_fit_clpm_C",
-      "safe_fit_clpm_resid",
-      "safe_fit_clpm_xgb",
-
-      "extract_lagged_parameters",
-      "extract_rho_vec",
-
-      "run_1_rep_study",
-
-      "N","T","k","scenarios","B_scenarios",
+      "N","T","k","scenarios","D_scenarios",
       "A","Psi","rho_extra","models_to_run","base_seed","ci_level",
-
-      "XGB_TUNED"
+      "xgb_tuned"
     ),
     envir = environment()
   )
@@ -142,19 +153,20 @@ run_simulation_study <- function(
     X  = 1:reps,
     cl = cl,
     FUN = function(rep_id) {
-      run_1_rep_study(
+      run_one_rep_study(
         rep_id        = rep_id,
         N             = N,
         T             = T,
         k             = k,
         scenarios     = scenarios,
-        B_scenarios   = B_scenarios,
+        D_scenarios   = D_scenarios,
         A             = A,
         Psi           = Psi,
         rho_extra     = rho_extra,
         models_to_run = models_to_run,
         base_seed     = base_seed,
-        ci_level      = ci_level
+        ci_level      = ci_level,
+        xgb_tuned     = xgb_tuned
       )
     }
   )

@@ -1,6 +1,20 @@
-# This script contains a function that runs all other functions for one replication of the study
-# this function should contain all the arguments that are defined in the previous sections
-# ------------------------------------------------------------------------------------------------
+# This function calls the previous functions to run one replication of the simulation study.
+#
+# 1) It checks the inputs:
+# - that B_scenarios is provided and contains all requested scenarios
+# - that each scenario trajectory is a list of length T
+# - that each B matrix is 2 x p, where p = k + number of interaction terms implied by k
+# - that the A matrix is 2x2
+# - that the Psi matrix is kxk (k = number of linear confounder parts)
+#
+# 2) It extracts the mean delta values (confounder effects) for X and Y at each time point for later output.
+# 3) It simulates panel data using the provided parameters with simulate_panel_data_int().
+# 4) It builds model strings for each model type.
+# 5) It calls the appropriate function(s) to fit the requested models.
+# 6) It calls the appropriate function(s) to extract gamma (cross-lagged), beta (autoregressive), and rho (residual correlation)
+#    estimates, along with p-values and confidence intervals.
+# 7) It stores the results in a list (one element per scenario) and returns a single bound data frame.
+# ------------------------------------------------------------------------------------------------------------
 
 run_one_rep_study <- function(
   rep_id,                                                 # replication index (set by outer loop)
@@ -34,6 +48,10 @@ run_one_rep_study <- function(
   missing_scens <- setdiff(scenarios, names(B_scenarios))
   if (length(missing_scens) > 0)
     stop("Scenario(s) not found in B_scenarios: ", paste(missing_scens, collapse = ", "))
+
+  # check A is 2 x 2
+  if (!is.matrix(A) || any(dim(A) != c(2, 2)))
+    stop("A must be a 2x2 matrix.")
 
   # check Psi is k x k
   if (!is.matrix(Psi) || any(dim(Psi) != c(k, k)))
@@ -76,13 +94,15 @@ run_one_rep_study <- function(
              " columns, but expected p = k + #interactions = ", p_exp, ".")
     }
 
-    # extract mean betas
-    beta_X_vec <- sapply(B_list, function(Bt) mean(Bt[1, ]))
-    beta_Y_vec <- sapply(B_list, function(Bt) mean(Bt[2, ]))
-    beta_vec   <- beta_X_vec
+    # extract mean deltas (confounder effects) for X and Y at each wave
+    delta_X_vec <- sapply(B_list, function(Bt) mean(Bt[1, ]))
+    delta_Y_vec <- sapply(B_list, function(Bt) mean(Bt[2, ]))
+    delta_vec   <- delta_X_vec
 
     # simulate panel data
     df <- tryCatch(
+
+      # simulate panel data
       simulate_panel_data_int(
         N         = N,
         T         = T,
@@ -98,46 +118,50 @@ run_one_rep_study <- function(
     if (is.null(df)) {
 
       out_list[[j]] <- data.frame(
+
+        # run info
         run      = rep(rep_id, T),
         occasion = 1:T,
         scenario = scen,
-        beta     = beta_vec,
-        beta_X   = beta_X_vec,
-        beta_Y   = beta_Y_vec,
 
-        # XY
-        estXY_CLPM      = NA, pXY_CLPM      = NA, ciL_XY_CLPM      = NA, ciU_XY_CLPM      = NA,
-        estXY_RI_CLPM   = NA, pXY_RI_CLPM   = NA, ciL_XY_RI_CLPM   = NA, ciU_XY_RI_CLPM   = NA,
-        estXY_DPM       = NA, pXY_DPM       = NA, ciL_XY_DPM       = NA, ciU_XY_DPM       = NA,
-        estXY_CLPM_Adj  = NA, pXY_CLPM_Adj  = NA, ciL_XY_CLPM_Adj  = NA, ciU_XY_CLPM_Adj  = NA,
-        estXY_CLPM_LBCA = NA, pXY_CLPM_LBCA = NA, ciL_XY_CLPM_LBCA = NA, ciU_XY_CLPM_LBCA = NA,
-        estXY_CLPM_XGB  = NA, pXY_CLPM_XGB  = NA, ciL_XY_CLPM_XGB  = NA, ciU_XY_CLPM_XGB  = NA,
+        # deltas = confounder effects
+        delta    = delta_vec,
+        delta_X  = delta_X_vec,
+        delta_Y  = delta_Y_vec,
 
-        # YX
-        estYX_CLPM      = NA, pYX_CLPM      = NA, ciL_YX_CLPM      = NA, ciU_YX_CLPM      = NA,
-        estYX_RI_CLPM   = NA, pYX_RI_CLPM   = NA, ciL_YX_RI_CLPM   = NA, ciU_YX_RI_CLPM   = NA,
-        estYX_DPM       = NA, pYX_DPM       = NA, ciL_YX_DPM       = NA, ciU_YX_DPM       = NA,
-        estYX_CLPM_Adj  = NA, pYX_CLPM_Adj  = NA, ciL_YX_CLPM_Adj  = NA, ciU_YX_CLPM_Adj  = NA,
-        estYX_CLPM_LBCA = NA, pYX_CLPM_LBCA = NA, ciL_YX_CLPM_LBCA = NA, ciU_YX_CLPM_LBCA = NA,
-        estYX_CLPM_XGB  = NA, pYX_CLPM_XGB  = NA, ciL_YX_CLPM_XGB  = NA, ciU_YX_CLPM_XGB  = NA,
+        # gammaXY = cross-lagged effect of X on Y
+        estGammaXY_CLPM      = NA, pGammaXY_CLPM      = NA, ciL_GammaXY_CLPM      = NA, ciU_GammaXY_CLPM      = NA,
+        estGammaXY_RI_CLPM   = NA, pGammaXY_RI_CLPM   = NA, ciL_GammaXY_RI_CLPM   = NA, ciU_GammaXY_RI_CLPM   = NA,
+        estGammaXY_DPM       = NA, pGammaXY_DPM       = NA, ciL_GammaXY_DPM       = NA, ciU_GammaXY_DPM       = NA,
+        estGammaXY_CLPM_Adj  = NA, pGammaXY_CLPM_Adj  = NA, ciL_GammaXY_CLPM_Adj  = NA, ciU_GammaXY_CLPM_Adj  = NA,
+        estGammaXY_CLPM_LBCA = NA, pGammaXY_CLPM_LBCA = NA, ciL_GammaXY_CLPM_LBCA = NA, ciU_GammaXY_CLPM_LBCA = NA,
+        estGammaXY_CLPM_XGB  = NA, pGammaXY_CLPM_XGB  = NA, ciL_GammaXY_CLPM_XGB  = NA, ciU_GammaXY_CLPM_XGB  = NA,
 
-        # AX
-        estA_CLPM      = NA, pA_CLPM      = NA, ciL_A_CLPM      = NA, ciU_A_CLPM      = NA,
-        estA_RI_CLPM   = NA, pA_RI_CLPM   = NA, ciL_A_RI_CLPM   = NA, ciU_A_RI_CLPM   = NA,
-        estA_DPM       = NA, pA_DPM       = NA, ciL_A_DPM       = NA, ciU_A_DPM       = NA,
-        estA_CLPM_Adj  = NA, pA_CLPM_Adj  = NA, ciL_A_CLPM_Adj  = NA, ciU_A_CLPM_Adj  = NA,
-        estA_CLPM_LBCA = NA, pA_CLPM_LBCA = NA, ciL_A_CLPM_LBCA = NA, ciU_A_CLPM_LBCA = NA,
-        estA_CLPM_XGB  = NA, pA_CLPM_XGB  = NA, ciL_A_CLPM_XGB  = NA, ciU_A_CLPM_XGB  = NA,
+        # gammaYX = cross-lagged effect of Y on X
+        estGammaYX_CLPM      = NA, pGammaYX_CLPM      = NA, ciL_GammaYX_CLPM      = NA, ciU_GammaYX_CLPM      = NA,
+        estGammaYX_RI_CLPM   = NA, pGammaYX_RI_CLPM   = NA, ciL_GammaYX_RI_CLPM   = NA, ciU_GammaYX_RI_CLPM   = NA,
+        estGammaYX_DPM       = NA, pGammaYX_DPM       = NA, ciL_GammaYX_DPM       = NA, ciU_GammaYX_DPM       = NA,
+        estGammaYX_CLPM_Adj  = NA, pGammaYX_CLPM_Adj  = NA, ciL_GammaYX_CLPM_Adj  = NA, ciU_GammaYX_CLPM_Adj  = NA,
+        estGammaYX_CLPM_LBCA = NA, pGammaYX_CLPM_LBCA = NA, ciL_GammaYX_CLPM_LBCA = NA, ciU_GammaYX_CLPM_LBCA = NA,
+        estGammaYX_CLPM_XGB  = NA, pGammaYX_CLPM_XGB  = NA, ciL_GammaYX_CLPM_XGB  = NA, ciU_GammaYX_CLPM_XGB  = NA,
 
-        # AY
-        estAY_CLPM      = NA, pAY_CLPM      = NA, ciL_AY_CLPM      = NA, ciU_AY_CLPM      = NA,
-        estAY_RI_CLPM   = NA, pAY_RI_CLPM   = NA, ciL_AY_RI_CLPM   = NA, ciU_AY_RI_CLPM   = NA,
-        estAY_DPM       = NA, pAY_DPM       = NA, ciL_AY_DPM       = NA, ciU_AY_DPM       = NA,
-        estAY_CLPM_Adj  = NA, pAY_CLPM_Adj  = NA, ciL_AY_CLPM_Adj  = NA, ciU_AY_CLPM_Adj  = NA,
-        estAY_CLPM_LBCA = NA, pAY_CLPM_LBCA = NA, ciL_AY_CLPM_LBCA = NA, ciU_AY_CLPM_LBCA = NA,
-        estAY_CLPM_XGB  = NA, pAY_CLPM_XGB  = NA, ciL_AY_CLPM_XGB  = NA, ciU_AY_CLPM_XGB  = NA,
+        # betaX = auto-regressive effect of X
+        estBetaX_CLPM      = NA, pBetaX_CLPM      = NA, ciL_BetaX_CLPM      = NA, ciU_BetaX_CLPM      = NA,
+        estBetaX_RI_CLPM   = NA, pBetaX_RI_CLPM   = NA, ciL_BetaX_RI_CLPM   = NA, ciU_BetaX_RI_CLPM   = NA,
+        estBetaX_DPM       = NA, pBetaX_DPM       = NA, ciL_BetaX_DPM       = NA, ciU_BetaX_DPM       = NA,
+        estBetaX_CLPM_Adj  = NA, pBetaX_CLPM_Adj  = NA, ciL_BetaX_CLPM_Adj  = NA, ciU_BetaX_CLPM_Adj  = NA,
+        estBetaX_CLPM_LBCA = NA, pBetaX_CLPM_LBCA = NA, ciL_BetaX_CLPM_LBCA = NA, ciU_BetaX_CLPM_LBCA = NA,
+        estBetaX_CLPM_XGB  = NA, pBetaX_CLPM_XGB  = NA, ciL_BetaX_CLPM_XGB  = NA, ciU_BetaX_CLPM_XGB  = NA,
 
-        # Rho
+        # betaY = auto-regressive effect of Y
+        estBetaY_CLPM      = NA, pBetaY_CLPM      = NA, ciL_BetaY_CLPM      = NA, ciU_BetaY_CLPM      = NA,
+        estBetaY_RI_CLPM   = NA, pBetaY_RI_CLPM   = NA, ciL_BetaY_RI_CLPM   = NA, ciU_BetaY_RI_CLPM   = NA,
+        estBetaY_DPM       = NA, pBetaY_DPM       = NA, ciL_BetaY_DPM       = NA, ciU_BetaY_DPM       = NA,
+        estBetaY_CLPM_Adj  = NA, pBetaY_CLPM_Adj  = NA, ciL_BetaY_CLPM_Adj  = NA, ciU_BetaY_CLPM_Adj  = NA,
+        estBetaY_CLPM_LBCA = NA, pBetaY_CLPM_LBCA = NA, ciL_BetaY_CLPM_LBCA = NA, ciU_BetaY_CLPM_LBCA = NA,
+        estBetaY_CLPM_XGB  = NA, pBetaY_CLPM_XGB  = NA, ciL_BetaY_CLPM_XGB  = NA, ciU_BetaY_CLPM_XGB  = NA,
+
+        # rho = residual correlation
         estRho_CLPM      = NA, pRho_CLPM      = NA, ciL_Rho_CLPM      = NA, ciU_Rho_CLPM      = NA,
         estRho_RI_CLPM   = NA, pRho_RI_CLPM   = NA, ciL_Rho_RI_CLPM   = NA, ciU_Rho_RI_CLPM   = NA,
         estRho_DPM       = NA, pRho_DPM       = NA, ciL_Rho_DPM       = NA, ciU_Rho_DPM       = NA,
@@ -145,6 +169,7 @@ run_one_rep_study <- function(
         estRho_CLPM_LBCA = NA, pRho_CLPM_LBCA = NA, ciL_Rho_CLPM_LBCA = NA, ciU_Rho_CLPM_LBCA = NA,
         estRho_CLPM_XGB  = NA, pRho_CLPM_XGB  = NA, ciL_Rho_CLPM_XGB  = NA, ciU_Rho_CLPM_XGB  = NA,
 
+        # fail flags if model failed
         fail_CLPM      = TRUE,
         fail_RI_CLPM   = TRUE,
         fail_DPM       = TRUE,
@@ -152,13 +177,15 @@ run_one_rep_study <- function(
         fail_CLPM_LBCA = TRUE,
         fail_CLPM_XGB  = TRUE,
 
+        # error messages since sim failed
         err_CLPM      = "sim failed",
         err_RI_CLPM   = "sim failed",
         err_DPM       = "sim failed",
         err_CLPM_Adj  = "sim failed",
         err_CLPM_LBCA = "sim failed",
         err_CLPM_XGB  = "sim failed",
-
+ 
+        # NA run marker
         is_na_run = 1L
       )
 
@@ -191,11 +218,11 @@ run_one_rep_study <- function(
 
     # extract lagged parameters
     lag_raw  <- extract_lagged_parameters(fit_clpm_raw, T, "clpm",    ci_level = ci_level)
-    lag_ric  <- extract_lagged_parameters(fit_ric,       T, "riclpm",  ci_level = ci_level)
-    lag_dpm0 <- extract_lagged_parameters(fit_dpm0,      T, "dpm",     ci_level = ci_level)
-    lag_adj  <- extract_lagged_parameters(fit_adj,       T, "clpm",    ci_level = ci_level)
-    lag_lbca <- extract_lagged_parameters(fit_lbca,      T, "clpm",    ci_level = ci_level)
-    lag_xgb  <- extract_lagged_parameters(fit_xgb,       T, "clpm",    ci_level = ci_level)
+    lag_ric  <- extract_lagged_parameters(fit_ric,      T, "riclpm",  ci_level = ci_level)
+    lag_dpm0 <- extract_lagged_parameters(fit_dpm0,     T, "dpm",     ci_level = ci_level)
+    lag_adj  <- extract_lagged_parameters(fit_adj,      T, "clpm",    ci_level = ci_level)
+    lag_lbca <- extract_lagged_parameters(fit_lbca,     T, "clpm",    ci_level = ci_level)
+    lag_xgb  <- extract_lagged_parameters(fit_xgb,      T, "clpm",    ci_level = ci_level)
 
     # extract residual correlations
     rho_clpm <- extract_rho_vec(fit_clpm_raw, T, "clpm",   ci_level = ci_level)
@@ -207,139 +234,142 @@ run_one_rep_study <- function(
 
     # assemble output rows
     out_list[[j]] <- data.frame(
+
+      # run info
       run      = rep(rep_id, T),
       occasion = 1:T,
       scenario = scen,
 
-      beta     = beta_vec,
-      beta_X   = beta_X_vec,
-      beta_Y   = beta_Y_vec,
+      # deltas = confounder effects
+      delta    = delta_vec,
+      delta_X  = delta_X_vec,
+      delta_Y  = delta_Y_vec,
 
-      # XY
-      estXY_CLPM      = c(NA, lag_raw$xy$est),
-      pXY_CLPM        = c(NA, lag_raw$xy$p),
-      ciL_XY_CLPM     = c(NA, lag_raw$xy$ci.lower),
-      ciU_XY_CLPM     = c(NA, lag_raw$xy$ci.upper),
+      # gammaXY = cross-lagged effect of X on Y
+      estGammaXY_CLPM      = c(NA, lag_raw$xy$est),
+      pGammaXY_CLPM        = c(NA, lag_raw$xy$p),
+      ciL_GammaXY_CLPM     = c(NA, lag_raw$xy$ci.lower),
+      ciU_GammaXY_CLPM     = c(NA, lag_raw$xy$ci.upper),
 
-      estXY_RI_CLPM   = c(NA, lag_ric$xy$est),
-      pXY_RI_CLPM     = c(NA, lag_ric$xy$p),
-      ciL_XY_RI_CLPM  = c(NA, lag_ric$xy$ci.lower),
-      ciU_XY_RI_CLPM  = c(NA, lag_ric$xy$ci.upper),
+      estGammaXY_RI_CLPM   = c(NA, lag_ric$xy$est),
+      pGammaXY_RI_CLPM     = c(NA, lag_ric$xy$p),
+      ciL_GammaXY_RI_CLPM  = c(NA, lag_ric$xy$ci.lower),
+      ciU_GammaXY_RI_CLPM  = c(NA, lag_ric$xy$ci.upper),
 
-      estXY_DPM       = c(NA, lag_dpm0$xy$est),
-      pXY_DPM         = c(NA, lag_dpm0$xy$p),
-      ciL_XY_DPM      = c(NA, lag_dpm0$xy$ci.lower),
-      ciU_XY_DPM      = c(NA, lag_dpm0$xy$ci.upper),
+      estGammaXY_DPM       = c(NA, lag_dpm0$xy$est),
+      pGammaXY_DPM         = c(NA, lag_dpm0$xy$p),
+      ciL_GammaXY_DPM      = c(NA, lag_dpm0$xy$ci.lower),
+      ciU_GammaXY_DPM      = c(NA, lag_dpm0$xy$ci.upper),
 
-      estXY_CLPM_Adj  = c(NA, lag_adj$xy$est),
-      pXY_CLPM_Adj    = c(NA, lag_adj$xy$p),
-      ciL_XY_CLPM_Adj = c(NA, lag_adj$xy$ci.lower),
-      ciU_XY_CLPM_Adj = c(NA, lag_adj$xy$ci.upper),
+      estGammaXY_CLPM_Adj  = c(NA, lag_adj$xy$est),
+      pGammaXY_CLPM_Adj    = c(NA, lag_adj$xy$p),
+      ciL_GammaXY_CLPM_Adj = c(NA, lag_adj$xy$ci.lower),
+      ciU_GammaXY_CLPM_Adj = c(NA, lag_adj$xy$ci.upper),
 
-      estXY_CLPM_LBCA  = c(NA, lag_lbca$xy$est),
-      pXY_CLPM_LBCA    = c(NA, lag_lbca$xy$p),
-      ciL_XY_CLPM_LBCA = c(NA, lag_lbca$xy$ci.lower),
-      ciU_XY_CLPM_LBCA = c(NA, lag_lbca$xy$ci.upper),
+      estGammaXY_CLPM_LBCA  = c(NA, lag_lbca$xy$est),
+      pGammaXY_CLPM_LBCA    = c(NA, lag_lbca$xy$p),
+      ciL_GammaXY_CLPM_LBCA = c(NA, lag_lbca$xy$ci.lower),
+      ciU_GammaXY_CLPM_LBCA = c(NA, lag_lbca$xy$ci.upper),
 
-      estXY_CLPM_XGB  = c(NA, lag_xgb$xy$est),
-      pXY_CLPM_XGB    = c(NA, lag_xgb$xy$p),
-      ciL_XY_CLPM_XGB = c(NA, lag_xgb$xy$ci.lower),
-      ciU_XY_CLPM_XGB = c(NA, lag_xgb$xy$ci.upper),
+      estGammaXY_CLPM_XGB  = c(NA, lag_xgb$xy$est),
+      pGammaXY_CLPM_XGB    = c(NA, lag_xgb$xy$p),
+      ciL_GammaXY_CLPM_XGB = c(NA, lag_xgb$xy$ci.lower),
+      ciU_GammaXY_CLPM_XGB = c(NA, lag_xgb$xy$ci.upper),
 
-      # YX
-      estYX_CLPM      = c(NA, lag_raw$yx$est),
-      pYX_CLPM        = c(NA, lag_raw$yx$p),
-      ciL_YX_CLPM     = c(NA, lag_raw$yx$ci.lower),
-      ciU_YX_CLPM     = c(NA, lag_raw$yx$ci.upper),
+      # gamma YX = cross-lagged effect of Y on X
+      estGammaYX_CLPM      = c(NA, lag_raw$yx$est),
+      pGammaYX_CLPM        = c(NA, lag_raw$yx$p),
+      ciL_GammaYX_CLPM     = c(NA, lag_raw$yx$ci.lower),
+      ciU_GammaYX_CLPM     = c(NA, lag_raw$yx$ci.upper),
 
-      estYX_RI_CLPM   = c(NA, lag_ric$yx$est),
-      pYX_RI_CLPM     = c(NA, lag_ric$yx$p),
-      ciL_YX_RI_CLPM  = c(NA, lag_ric$yx$ci.lower),
-      ciU_YX_RI_CLPM  = c(NA, lag_ric$yx$ci.upper),
+      estGammaYX_RI_CLPM   = c(NA, lag_ric$yx$est),
+      pGammaYX_RI_CLPM     = c(NA, lag_ric$yx$p),
+      ciL_GammaYX_RI_CLPM  = c(NA, lag_ric$yx$ci.lower),
+      ciU_GammaYX_RI_CLPM  = c(NA, lag_ric$yx$ci.upper),
 
-      estYX_DPM       = c(NA, lag_dpm0$yx$est),
-      pYX_DPM         = c(NA, lag_dpm0$yx$p),
-      ciL_YX_DPM      = c(NA, lag_dpm0$yx$ci.lower),
-      ciU_YX_DPM      = c(NA, lag_dpm0$yx$ci.upper),
+      estGammaYX_DPM       = c(NA, lag_dpm0$yx$est),
+      pGammaYX_DPM         = c(NA, lag_dpm0$yx$p),
+      ciL_GammaYX_DPM      = c(NA, lag_dpm0$yx$ci.lower),
+      ciU_GammaYX_DPM      = c(NA, lag_dpm0$yx$ci.upper),
 
-      estYX_CLPM_Adj  = c(NA, lag_adj$yx$est),
-      pYX_CLPM_Adj    = c(NA, lag_adj$yx$p),
-      ciL_YX_CLPM_Adj = c(NA, lag_adj$yx$ci.lower),
-      ciU_YX_CLPM_Adj = c(NA, lag_adj$yx$ci.upper),
+      estGammaYX_CLPM_Adj  = c(NA, lag_adj$yx$est),
+      pGammaYX_CLPM_Adj    = c(NA, lag_adj$yx$p),
+      ciL_GammaYX_CLPM_Adj = c(NA, lag_adj$yx$ci.lower),
+      ciU_GammaYX_CLPM_Adj = c(NA, lag_adj$yx$ci.upper),
 
-      estYX_CLPM_LBCA  = c(NA, lag_lbca$yx$est),
-      pYX_CLPM_LBCA    = c(NA, lag_lbca$yx$p),
-      ciL_YX_CLPM_LBCA = c(NA, lag_lbca$yx$ci.lower),
-      ciU_YX_CLPM_LBCA = c(NA, lag_lbca$yx$ci.upper),
+      estGammaYX_CLPM_LBCA  = c(NA, lag_lbca$yx$est),
+      pGammaYX_CLPM_LBCA    = c(NA, lag_lbca$yx$p),
+      ciL_GammaYX_CLPM_LBCA = c(NA, lag_lbca$yx$ci.lower),
+      ciU_GammaYX_CLPM_LBCA = c(NA, lag_lbca$yx$ci.upper),
 
-      estYX_CLPM_XGB  = c(NA, lag_xgb$yx$est),
-      pYX_CLPM_XGB    = c(NA, lag_xgb$yx$p),
-      ciL_YX_CLPM_XGB = c(NA, lag_xgb$yx$ci.lower),
-      ciU_YX_CLPM_XGB = c(NA, lag_xgb$yx$ci.upper),
+      estGammaYX_CLPM_XGB  = c(NA, lag_xgb$yx$est),
+      pGammaYX_CLPM_XGB    = c(NA, lag_xgb$yx$p),
+      ciL_GammaYX_CLPM_XGB = c(NA, lag_xgb$yx$ci.lower),
+      ciU_GammaYX_CLPM_XGB = c(NA, lag_xgb$yx$ci.upper),
 
-      # AX
-      estA_CLPM      = c(NA, lag_raw$ar_x$est),
-      pA_CLPM        = c(NA, lag_raw$ar_x$p),
-      ciL_A_CLPM     = c(NA, lag_raw$ar_x$ci.lower),
-      ciU_A_CLPM     = c(NA, lag_raw$ar_x$ci.upper),
+      # betaX = auto-regressive effect of X
+      estBetaX_CLPM      = c(NA, lag_raw$ar_x$est),
+      pBetaX_CLPM        = c(NA, lag_raw$ar_x$p),
+      ciL_BetaX_CLPM     = c(NA, lag_raw$ar_x$ci.lower),
+      ciU_BetaX_CLPM     = c(NA, lag_raw$ar_x$ci.upper),
 
-      estA_RI_CLPM   = c(NA, lag_ric$ar_x$est),
-      pA_RI_CLPM     = c(NA, lag_ric$ar_x$p),
-      ciL_A_RI_CLPM  = c(NA, lag_ric$ar_x$ci.lower),
-      ciU_A_RI_CLPM  = c(NA, lag_ric$ar_x$ci.upper),
+      estBetaX_RI_CLPM   = c(NA, lag_ric$ar_x$est),
+      pBetaX_RI_CLPM     = c(NA, lag_ric$ar_x$p),
+      ciL_BetaX_RI_CLPM  = c(NA, lag_ric$ar_x$ci.lower),
+      ciU_BetaX_RI_CLPM  = c(NA, lag_ric$ar_x$ci.upper),
 
-      estA_DPM       = c(NA, lag_dpm0$ar_x$est),
-      pA_DPM         = c(NA, lag_dpm0$ar_x$p),
-      ciL_A_DPM      = c(NA, lag_dpm0$ar_x$ci.lower),
-      ciU_A_DPM      = c(NA, lag_dpm0$ar_x$ci.upper),
+      estBetaX_DPM       = c(NA, lag_dpm0$ar_x$est),
+      pBetaX_DPM         = c(NA, lag_dpm0$ar_x$p),
+      ciL_BetaX_DPM      = c(NA, lag_dpm0$ar_x$ci.lower),
+      ciU_BetaX_DPM      = c(NA, lag_dpm0$ar_x$ci.upper),
 
-      estA_CLPM_Adj  = c(NA, lag_adj$ar_x$est),
-      pA_CLPM_Adj    = c(NA, lag_adj$ar_x$p),
-      ciL_A_CLPM_Adj = c(NA, lag_adj$ar_x$ci.lower),
-      ciU_A_CLPM_Adj = c(NA, lag_adj$ar_x$ci.upper),
+      estBetaX_CLPM_Adj  = c(NA, lag_adj$ar_x$est),
+      pBetaX_CLPM_Adj    = c(NA, lag_adj$ar_x$p),
+      ciL_BetaX_CLPM_Adj = c(NA, lag_adj$ar_x$ci.lower),
+      ciU_BetaX_CLPM_Adj = c(NA, lag_adj$ar_x$ci.upper),
 
-      estA_CLPM_LBCA  = c(NA, lag_lbca$ar_x$est),
-      pA_CLPM_LBCA    = c(NA, lag_lbca$ar_x$p),
-      ciL_A_CLPM_LBCA = c(NA, lag_lbca$ar_x$ci.lower),
-      ciU_A_CLPM_LBCA = c(NA, lag_lbca$ar_x$ci.upper),
+      estBetaX_CLPM_LBCA  = c(NA, lag_lbca$ar_x$est),
+      pBetaX_CLPM_LBCA    = c(NA, lag_lbca$ar_x$p),
+      ciL_BetaX_CLPM_LBCA = c(NA, lag_lbca$ar_x$ci.lower),
+      ciU_BetaX_CLPM_LBCA = c(NA, lag_lbca$ar_x$ci.upper),
 
-      estA_CLPM_XGB  = c(NA, lag_xgb$ar_x$est),
-      pA_CLPM_XGB    = c(NA, lag_xgb$ar_x$p),
-      ciL_A_CLPM_XGB = c(NA, lag_xgb$ar_x$ci.lower),
-      ciU_A_CLPM_XGB = c(NA, lag_xgb$ar_x$ci.upper),
+      estBetaX_CLPM_XGB  = c(NA, lag_xgb$ar_x$est),
+      pBetaX_CLPM_XGB    = c(NA, lag_xgb$ar_x$p),
+      ciL_BetaX_CLPM_XGB = c(NA, lag_xgb$ar_x$ci.lower),
+      ciU_BetaX_CLPM_XGB = c(NA, lag_xgb$ar_x$ci.upper),
 
-      # AY
-      estAY_CLPM      = c(NA, lag_raw$ar_y$est),
-      pAY_CLPM        = c(NA, lag_raw$ar_y$p),
-      ciL_AY_CLPM     = c(NA, lag_raw$ar_y$ci.lower),
-      ciU_AY_CLPM     = c(NA, lag_raw$ar_y$ci.upper),
+      # betaY = auto-regressive effect of Y
+      estBetaY_CLPM      = c(NA, lag_raw$ar_y$est),
+      pBetaY_CLPM        = c(NA, lag_raw$ar_y$p),
+      ciL_BetaY_CLPM     = c(NA, lag_raw$ar_y$ci.lower),
+      ciU_BetaY_CLPM     = c(NA, lag_raw$ar_y$ci.upper),
 
-      estAY_RI_CLPM   = c(NA, lag_ric$ar_y$est),
-      pAY_RI_CLPM     = c(NA, lag_ric$ar_y$p),
-      ciL_AY_RI_CLPM  = c(NA, lag_ric$ar_y$ci.lower),
-      ciU_AY_RI_CLPM  = c(NA, lag_ric$ar_y$ci.upper),
+      estBetaY_RI_CLPM   = c(NA, lag_ric$ar_y$est),
+      pBetaY_RI_CLPM     = c(NA, lag_ric$ar_y$p),
+      ciL_BetaY_RI_CLPM  = c(NA, lag_ric$ar_y$ci.lower),
+      ciU_BetaY_RI_CLPM  = c(NA, lag_ric$ar_y$ci.upper),
 
-      estAY_DPM       = c(NA, lag_dpm0$ar_y$est),
-      pAY_DPM         = c(NA, lag_dpm0$ar_y$p),
-      ciL_AY_DPM      = c(NA, lag_dpm0$ar_y$ci.lower),
-      ciU_AY_DPM      = c(NA, lag_dpm0$ar_y$ci.upper),
+      estBetaY_DPM       = c(NA, lag_dpm0$ar_y$est),
+      pBetaY_DPM         = c(NA, lag_dpm0$ar_y$p),
+      ciL_BetaY_DPM      = c(NA, lag_dpm0$ar_y$ci.lower),
+      ciU_BetaY_DPM      = c(NA, lag_dpm0$ar_y$ci.upper),
 
-      estAY_CLPM_Adj  = c(NA, lag_adj$ar_y$est),
-      pAY_CLPM_Adj    = c(NA, lag_adj$ar_y$p),
-      ciL_AY_CLPM_Adj = c(NA, lag_adj$ar_y$ci.lower),
-      ciU_AY_CLPM_Adj = c(NA, lag_adj$ar_y$ci.upper),
+      estBetaY_CLPM_Adj  = c(NA, lag_adj$ar_y$est),
+      pBetaY_CLPM_Adj    = c(NA, lag_adj$ar_y$p),
+      ciL_BetaY_CLPM_Adj = c(NA, lag_adj$ar_y$ci.lower),
+      ciU_BetaY_CLPM_Adj = c(NA, lag_adj$ar_y$ci.upper),
 
-      estAY_CLPM_LBCA  = c(NA, lag_lbca$ar_y$est),
-      pAY_CLPM_LBCA    = c(NA, lag_lbca$ar_y$p),
-      ciL_AY_CLPM_LBCA = c(NA, lag_lbca$ar_y$ci.lower),
-      ciU_AY_CLPM_LBCA = c(NA, lag_lbca$ar_y$ci.upper),
+      estBetaY_CLPM_LBCA  = c(NA, lag_lbca$ar_y$est),
+      pBetaY_CLPM_LBCA    = c(NA, lag_lbca$ar_y$p),
+      ciL_BetaY_CLPM_LBCA = c(NA, lag_lbca$ar_y$ci.lower),
+      ciU_BetaY_CLPM_LBCA = c(NA, lag_lbca$ar_y$ci.upper),
 
-      estAY_CLPM_XGB  = c(NA, lag_xgb$ar_y$est),
-      pAY_CLPM_XGB    = c(NA, lag_xgb$ar_y$p),
-      ciL_AY_CLPM_XGB = c(NA, lag_xgb$ar_y$ci.lower),
-      ciU_AY_CLPM_XGB = c(NA, lag_xgb$ar_y$ci.upper),
+      estBetaY_CLPM_XGB  = c(NA, lag_xgb$ar_y$est),
+      pBetaY_CLPM_XGB    = c(NA, lag_xgb$ar_y$p),
+      ciL_BetaY_CLPM_XGB = c(NA, lag_xgb$ar_y$ci.lower),
+      ciU_BetaY_CLPM_XGB = c(NA, lag_xgb$ar_y$ci.upper),
 
-      # Rho
+      # rho = residual correlation between X and Y
       estRho_CLPM      = rho_clpm$est,
       pRho_CLPM        = rho_clpm$p,
       ciL_Rho_CLPM     = rho_clpm$ci.lower,
@@ -370,6 +400,7 @@ run_one_rep_study <- function(
       ciL_Rho_CLPM_XGB = rho_xgb$ci.lower,
       ciU_Rho_CLPM_XGB = rho_xgb$ci.upper,
 
+      # fit failures
       fail_CLPM      = is.null(fit_clpm_raw),
       fail_RI_CLPM   = is.null(fit_ric),
       fail_DPM       = is.null(fit_dpm0),
@@ -377,6 +408,7 @@ run_one_rep_study <- function(
       fail_CLPM_LBCA = is.null(fit_lbca),
       fail_CLPM_XGB  = is.null(fit_xgb),
 
+      # error messages
       err_CLPM      = rep(res_clpm$err,  T),
       err_RI_CLPM   = rep(res_ric$err,   T),
       err_DPM       = rep(res_dpm0$err,  T),
@@ -384,6 +416,7 @@ run_one_rep_study <- function(
       err_CLPM_LBCA = rep(res_lbca$err,  T),
       err_CLPM_XGB  = rep(res_xgb$err,   T),
 
+      # NA run marker
       is_na_run = as.integer(all(is.na(c(
         lag_raw$xy$est, lag_ric$xy$est, lag_dpm0$xy$est,
         lag_adj$xy$est, lag_lbca$xy$est, lag_xgb$xy$est
