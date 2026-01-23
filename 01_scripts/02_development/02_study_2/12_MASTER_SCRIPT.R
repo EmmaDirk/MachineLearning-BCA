@@ -29,7 +29,7 @@ D1 <- sample_delta_1(
   R2_total = 0.15,                                     # total confounder R2 at time t = 1
   min_abs = 0.001,                                     # minimum absolute value for each coefficient
   max_abs = 0.40,                                      # maximum absolute value for each coefficient
-  R2_nonlin = 0.1                                      # fraction of R2_1 allocated to non-linear terms
+  R2_nonlin = 0.4                                      # fraction of R2_1 allocated to non-linear terms
 )
 
 # step 2: make delta trajectories from the sampled delta matrix
@@ -73,8 +73,8 @@ source(here("01_scripts", "02_development", "02_study_2", "11_plotting.R"))
 
 # step 6: run the simulation study
 results_sim <- run_simulation_study(
-  reps        = 20,                                    # replications
-  N           = 100,                                   # sample size
+  reps        = 200,                                   # replications
+  N           = 1000,                                  # sample size
   T           = 5,                                     # number of time points
   k           = 3,                                     # number of confounders
   scenarios   = c("constant", "stepwise"),             # delta scenarios
@@ -106,8 +106,8 @@ results_sim <- run_simulation_study(
   # xgb tuning and fitting speed settings
   tune_xgb          = TRUE,                            # tune once on a pilot dataset
   xgb_tuned         = NULL,                            # optionally pass a tuned object directly instead
-  xgb_tune_profile  = "quick",                         # tuning speed ("quick", "medium", "full")
-  xgb_fit_profile   = "fast",                          # fit speed during residualisation ("fast", "balanced", "thorough")
+  xgb_tune_profile  = "medium",                        # tuning speed ("quick", "medium", "full")
+  xgb_fit_profile   = "balanced",                      # fit speed during residualisation ("fast", "balanced", "thorough")
 
   # overwrite options for tuning
   xgb_tune_grid      = NULL,                           # overwrite grid, set NULL to use profile defaults
