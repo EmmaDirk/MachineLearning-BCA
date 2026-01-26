@@ -17,11 +17,11 @@ library(here)
 set.seed(1234)
 
 # step 0: load the required packages
-source(here("01_scripts", "02_development", "02_study_2", "00_packages.R"))
+source(here("01_scripts", "02_development", "02_study_2_RR", "00_packages.R"))
 
 # step 1: sample a delta matrix (confounder effects at t = 1)
 # get the function to sample the delta matrix
-source(here("01_scripts", "02_development", "02_study_2", "01_delta_sampler.R"))
+source(here("01_scripts", "02_development", "02_study_2_RR", "01_delta_sampler.R"))
 
 # sample D1 matrix
 D1 <- sample_delta_1(
@@ -34,7 +34,7 @@ D1 <- sample_delta_1(
 
 # step 2: make delta trajectories from the sampled delta matrix
 # get the function to make the delta trajectory
-source(here("01_scripts", "02_development", "02_study_2", "02_delta_trajectory.R"))
+source(here("01_scripts", "02_development", "02_study_2_RR", "02_delta_trajectory.R"))
 
 # make a constant delta trajectory over 5 time points
 D_list_constant <- generate_D_constant(
@@ -61,15 +61,15 @@ A <- matrix(c(
 Psi <- diag(3)                                         # uncorrelated confounders with var=1
 
 # step 5: call all the functions that the simulation function needs
-source(here("01_scripts", "02_development", "02_study_2", "03_simulate_panel_data.R"))
-source(here("01_scripts", "02_development", "02_study_2", "04_lavaan_model_string_builder.R"))
-source(here("01_scripts", "02_development", "02_study_2", "05_residualisers.R"))
-source(here("01_scripts", "02_development", "02_study_2", "06_model_fitters.R"))
-source(here("01_scripts", "02_development", "02_study_2", "07_model_tuners.R"))
-source(here("01_scripts", "02_development", "02_study_2", "08_fit_stat_extractors.R"))
-source(here("01_scripts", "02_development", "02_study_2", "09_one_replication_wrapper.R"))
-source(here("01_scripts", "02_development", "02_study_2", "10_simulation_function.R"))
-source(here("01_scripts", "02_development", "02_study_2", "11_plotting.R"))
+source(here("01_scripts", "02_development", "02_study_2_RR", "03_simulate_panel_data.R"))
+source(here("01_scripts", "02_development", "02_study_2_RR", "04_lavaan_model_string_builder.R"))
+source(here("01_scripts", "02_development", "02_study_2_RR", "05_residualisers.R"))
+source(here("01_scripts", "02_development", "02_study_2_RR", "06_model_fitters.R"))
+source(here("01_scripts", "02_development", "02_study_2_RR", "07_model_tuners.R"))
+source(here("01_scripts", "02_development", "02_study_2_RR", "08_fit_stat_extractors.R"))
+source(here("01_scripts", "02_development", "02_study_2_RR", "09_one_replication_wrapper.R"))
+source(here("01_scripts", "02_development", "02_study_2_RR", "10_simulation_function.R"))
+source(here("01_scripts", "02_development", "02_study_2_RR", "11_plotting.R"))
 
 # step 6: run the simulation study
 results_sim <- run_simulation_study(

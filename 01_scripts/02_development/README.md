@@ -1,4 +1,5 @@
 In this folder are simulation studies. In each folder is a collection of scripts which together form a simulation engine. All complete engines or engines under construction will be added to this directory. The following studies are currently available:
 
-* `01_study_1`: this is simulation study 1 from the research report. It aims to investigate the performance of the CLPM, adjusted CLPM, RI-CLPM, DPM and the BCA CLPM, when the effects of baseline confounders are time-variant. 
-* `02_study_2`: this is simulation study 2 from the research report. It aims to investigate the performance of the CLPM, adjusted CLPM, RI-CLPM, DPM and the BCA (linear and XGB) CLPM, when the effects of baseline confounders are time-variant and non-linear (i.e. interaction terms).
+* `01_study_1_RR`: this is simulation study 1 from the research report. It aims to investigate the performance of the CLPM, adjusted CLPM, RI-CLPM, DPM and the BCA CLPM, when the effects of baseline confounders are time-variant. 
+* `02_study_2_RR`: this is simulation study 2 from the research report. It aims to investigate the performance of the CLPM, adjusted CLPM, RI-CLPM, DPM and the BCA (linear and XGB) CLPM, when the effects of baseline confounders are time-variant and non-linear (i.e. interaction terms).
+* `03_free_loadings`: investigates the performance of the RI-CLPM and DPM when we free the loadings of the latent factors. All effects in this study are linear, but varying over time. 

@@ -23,11 +23,11 @@ library(here)
 set.seed(1234)
 
 # step 0: load the required packages
-source(here("01_scripts", "02_development", "01_study_1", "00_packages.R"))
+source(here("01_scripts", "02_development", "03_free_loadings", "00_packages.R"))
 
 # step 1: sample a delta-matrix
 # get the function to sample the delta-matrix
-source(here("01_scripts", "02_development", "01_study_1", "01_delta_sampler.R"))
+source(here("01_scripts", "02_development", "03_free_loadings", "01_delta_sampler.R"))
 
 # sample D1 matrix
 D1 <- sample_delta_1(
@@ -40,7 +40,7 @@ D1 <- sample_delta_1(
 
 # step 2: make a delta trajectory from the sampled delta-matrix
 # get the function to make the delta trajectory
-source(here("01_scripts", "02_development", "01_study_1", "02_delta_trajectory.R"))
+source(here("01_scripts", "02_development", "03_free_loadings", "02_delta_trajectory.R"))
 
 # make a constant delta trajectory over 5 time points
 D_list_constant <- generate_D_constant(
@@ -68,22 +68,22 @@ A <- matrix(c(
 Psi <- diag(3)                     # uncorrelated confounders with var=1
 
 # step 5: call all the functions that the simulation function (09) needs
-source(here("01_scripts", "02_development", "01_study_1", "03_simulate_panel_data.R"))
-source(here("01_scripts", "02_development", "01_study_1", "04_lavaan_model_string_builder.R"))
-source(here("01_scripts", "02_development", "01_study_1", "05_linear_residualiser.R"))
-source(here("01_scripts", "02_development", "01_study_1", "06_model_fitters.R"))
-source(here("01_scripts", "02_development", "01_study_1", "07_fit_stat_extractors.R"))
-source(here("01_scripts", "02_development", "01_study_1", "08_one_replication_wrapper.R"))
+source(here("01_scripts", "02_development", "03_free_loadings", "03_simulate_panel_data.R"))
+source(here("01_scripts", "02_development", "03_free_loadings", "04_lavaan_model_string_builder.R"))
+source(here("01_scripts", "02_development", "03_free_loadings", "05_linear_residualiser.R"))
+source(here("01_scripts", "02_development", "03_free_loadings", "06_model_fitters.R"))
+source(here("01_scripts", "02_development", "03_free_loadings", "07_fit_stat_extractors.R"))
+source(here("01_scripts", "02_development", "03_free_loadings", "08_one_replication_wrapper.R"))
 
 # step 6: run the simulation study function
 # get the function to run the full simulation study
-source(here("01_scripts", "02_development", "01_study_1", "09_simulation_function.R"))
+source(here("01_scripts", "02_development", "03_free_loadings", "09_simulation_function.R"))
 
 # run the simulation study
 # run a small example simulation study
 results_sim <- run_simulation_study(
-  reps        = 20,                                    # replications
-  N           = 5000,                                  # sample size
+  reps        = 200,                                   # replications
+  N           = 1000,                                  # sample size
   T           = 5,                                     # number of time points
   k           = 3,                                     # number of confounders
   scenarios   = c("constant", "stepwise"),             # D scenarios
@@ -97,7 +97,9 @@ results_sim <- run_simulation_study(
   models_to_run = c(                                   # models to run
     "clpm",
     "riclpm",
+    "riclpm_free_RI_loadings",
     "dpm",
+    "dpm_free_loadings",
     "adj",
     "lbca"
   ),
@@ -115,12 +117,12 @@ results_sim <- run_simulation_study(
 # step 7: save the results 
 saveRDS(
   results_sim,
-  file = here::here("02_data", "01_research_report","study_1_RR_results.rds")
+  file = here::here("02_data", "01_research_report","study_3_RR_results.rds")
 )
 
 # step 8: produce the plot
 # get the plotting function
-source(here("01_scripts", "02_development", "01_study_1", "10_plotting.R"))
+source(here("01_scripts", "02_development", "03_free_loadings", "10_plotting.R"))
 
 # produce the plot
 p <- plot_sim_study_results(
@@ -133,7 +135,7 @@ print(p$combined_gamma_XY)
 
 # save the plot
 ggsave(
-  filename = here::here("03_output", "01_latest", "RR_study_1.png"),
+  filename = here::here("03_output", "01_latest", "RR_study_3.png"),
   plot     = p$combined_gamma_XY,
   width    = 10,
   height   = 8,
