@@ -135,7 +135,7 @@ print(p$combined_gamma_XY)
 
 # save the plot
 ggsave(
-  filename = here::here("03_output", "01_latest", "RR_study_3.png"),
+  filename = here::here("03_output", "01_latest", "RR_study_3_3.png"),
   plot     = p$combined_gamma_XY,
   width    = 10,
   height   = 8,
