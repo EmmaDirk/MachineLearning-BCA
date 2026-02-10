@@ -34,7 +34,7 @@ run_simulation_study <- function(
   A,                                                                       # 2×2 autoregressive (beta) + cross-lagged (gamma) matrix
   Psi,                                                                     # k×k confounder covariance
   rho_extra,                                                               # extra covariance added to observations
-  models_to_run,                                                           # c("clpm","riclpm","riclpm_free_RI_loadings","dpm","dpm_free_loadings","adj","lbca")
+  models_to_run,                                                           # model keys to run
   cores = NULL,                                                            # default is detectCores()/2
   base_seed = 1234,                                                        # master seed
   ci_level = 0.95                                                          # CI level for extracted parameters
@@ -97,24 +97,41 @@ run_simulation_study <- function(
   parallel::clusterExport(
     cl,
     c(
+      # simulation
       "simulate_panel_data",
+
+      # model builders
       "build_clpm",
       "build_riclpm",
-      "build_riclpm_free_RI_loadings",
       "build_dpm",
-      "build_dpm_free_loadings",
       "build_clpm_with_Cs",
+      "build_riclpm_free_ri_loadings",
+      "build_dpm_free_loadings",
+
+      # model fitters (9 models)
       "safe_fit_clpm",
-      "safe_fit_riclpm",
-      "safe_fit_riclpm_free_RI_loadings",
-      "safe_fit_dpm",
-      "safe_fit_dpm_free_loadings",
       "safe_fit_clpm_C",
+      "safe_fit_riclpm",
+      "safe_fit_dpm",
+      "safe_fit_riclpm_free_loadings",
+      "safe_fit_dpm_free_loadings",
       "safe_fit_clpm_resid",
+      "safe_fit_riclpm_resid",
+      "safe_fit_dpm_resid",
+
+      # extraction + diagnostics
       "extract_lagged_parameters",
       "extract_rho_vec",
+      "is_psd",
+      "check_convergence_and_properness",
+
+      # bca helper
       "residualise_panel_linearC",
+
+      # wrapper
       "run_one_rep_study",
+
+      # objects / settings
       "N","T","k","scenarios","D_scenarios",
       "A","Psi","rho_extra","models_to_run","base_seed","ci_level"
     ),

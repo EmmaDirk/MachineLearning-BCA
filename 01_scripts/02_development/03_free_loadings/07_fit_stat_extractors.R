@@ -1,18 +1,147 @@
 # Since all fits are slightly different, we need to figure out where in the model object
 # our parameters of interest: autoregressive (betas), cross-lagged (gammas), and residual correlation (rho) are located
 # 
-# Currently, the functions are equiped to extract parameters from:
+# Currently, the functions are equiped to extract parameters from (multiple versions of):
 # - CLPM
 # - RI-CLPM
 # - DPM
+# 
+# this script additionally checks if models converge and if the solutions are proper
+# i.e.:
+# - no negative variances in any matrix (e.g. psi, theta, sigma)
+# - all parameters are finite (no Inf or NaN)
+# - all matrices are positive semidefinite
 # ------------------------------------------------------------------------------------------------
+
+# helper function to check for positive semidefiniteness
+is_psd <- function(M, tol = 1e-8) {
+
+  # return TRUE for NULL or non-matrix input (nothing to check)
+  if (is.null(M) || !is.matrix(M)) return(TRUE)
+
+  # 0x0 or 1x1 matrices are always psd
+  if (nrow(M) <= 1) return(TRUE)
+
+  # symmetrize defensively
+  Ms <- (M + t(M)) / 2
+
+  # eigenvalues
+  ev <- tryCatch(
+    eigen(Ms, symmetric = TRUE, only.values = TRUE)$values,
+    error = function(e) NA_real_
+  )
+
+  # if eigen failed, we can't confirm psd, so return FALSE
+  if (all(is.na(ev))) return(FALSE)
+
+  # psd if smallest eigenvalue is not too negative
+  min(ev) >= -tol
+}
+
+# helper function to check if the solution is proper
+# returns a list with:
+# - converged: did lavaan converge?
+# - proper: is the solution proper?
+# - reasons: character vector with reasons if not proper
+check_convergence_and_properness <- function(fit, tol = 1e-8) {
+
+  # if no fit, return NAs
+  if (is.null(fit)) {
+    return(list(
+      converged = FALSE,
+      proper    = NA,
+      reasons   = NA_character_
+    ))
+  }
+
+  # check convergence
+  converged <- isTRUE(tryCatch(lavaan::inspect(fit, "converged"), error = function(e) FALSE))
+
+  # if not converged, do not classify properness
+  if (!converged) {
+    return(list(
+      converged = FALSE,
+      proper    = NA,
+      reasons   = "Model did not converge"
+    ))
+  }
+
+  # collect reasons for improperness
+  reasons <- character(0)
+
+  # try to extract parameter estimates (also used for negative variances / finiteness)
+  pe <- tryCatch(lavaan::parameterEstimates(fit), error = function(e) NULL)
+
+  # check parameter finiteness
+  if (is.null(pe)) {
+
+    reasons <- c(reasons, "Could not extract parameter estimates")
+
+  } else {
+
+    # check for non-finite estimates
+    if (any(!is.finite(pe$est))) {
+      reasons <- c(reasons, "Non-finite parameter estimate(s) (Inf/NaN/NA)")
+    }
+
+    # check for non-finite standard errors if available
+    if ("se" %in% names(pe) && any(!is.finite(pe$se))) {
+      reasons <- c(reasons, "Non-finite standard error(s) (Inf/NaN/NA)")
+    }
+
+    # check for negative variances (free parameters only if possible)
+    var_rows <- pe$op == "~~" & pe$lhs == pe$rhs
+
+    # if free column exists, only consider freely estimated variances
+    if ("free" %in% names(pe)) {
+      var_rows <- var_rows & pe$free > 0
+    }
+
+    neg_vars <- pe[var_rows & is.finite(pe$est) & pe$est < -tol, , drop = FALSE]
+    if (nrow(neg_vars) > 0) {
+      reasons <- c(
+        reasons,
+        paste0("Negative variance(s): ", paste(unique(neg_vars$lhs), collapse = ", "))
+      )
+    }
+  }
+
+  # check key matrices for psd (theta, psi, sigma, cov.lv)
+  theta  <- tryCatch(lavaan::lavInspect(fit, "theta"),  error = function(e) NULL)
+  psi    <- tryCatch(lavaan::lavInspect(fit, "psi"),    error = function(e) NULL)
+  sigma  <- tryCatch(lavaan::lavInspect(fit, "sigma"),  error = function(e) NULL)
+  cov_lv <- tryCatch(lavaan::lavInspect(fit, "cov.lv"), error = function(e) NULL)
+
+  if (!is_psd(theta,  tol = tol)) reasons <- c(reasons, "Theta (residual cov matrix) is not psd")
+  if (!is_psd(psi,    tol = tol)) reasons <- c(reasons, "Psi (latent cov matrix) is not psd")
+  if (!is_psd(sigma,  tol = tol)) reasons <- c(reasons, "Sigma (implied cov matrix) is not psd")
+  if (!is_psd(cov_lv, tol = tol)) reasons <- c(reasons, "cov.lv (latent cov matrix) is not psd")
+
+  # singularity / vcov problems (information matrix issues)
+  V <- tryCatch(lavaan::vcov(fit), error = function(e) NULL)
+
+  if (is.null(V)) {
+    reasons <- c(reasons, "vcov(fit) could not be computed (possible singular information matrix)")
+  } else if (any(!is.finite(V))) {
+    reasons <- c(reasons, "vcov(fit) contains non-finite values (possible singular information matrix)")
+  }
+
+  # proper if no reasons
+  proper <- length(reasons) == 0
+
+  list(
+    converged = TRUE,
+    proper    = proper,
+    reasons   = if (!proper) reasons else character(0)
+  )
+}
 
 # lagged parameters extractor
 # now returns: est, p-value, CI lower, CI upper for each lagged parameter
 extract_lagged_parameters <- function(
     fit,                                                      # lavaan model object
     T,                                                        # number of time points
-    model_type = c("clpm", "riclpm", "riclpm_free_RI_loadings", "dpm", "dpm_free_loadings"),                  # model type
+    model_type = c("clpm", "riclpm", "dpm"),                  # model type
     ci_level = 0.95                                           # CI level
 ){
 
@@ -54,7 +183,7 @@ extract_lagged_parameters <- function(
   }
 
   # RI-CLPM uses latent within-person variables wx, wy
-  if (model_type %in% c("riclpm", "riclpm_free_RI_loadings")) {
+  if (model_type == "riclpm") {
     xvar <- "wx"
     yvar <- "wy"
   } else {
@@ -119,7 +248,7 @@ extract_lagged_parameters <- function(
 extract_rho_vec <- function(
     fit,                                                           # lavaan model object
     T,                                                             # number of time points
-    model_type = c("clpm","riclpm","riclpm_free_RI_loadings","dpm","dpm_free_loadings")                          # model type
+    model_type = c("clpm","riclpm","dpm")                          # model type
 ){
 
   # match model type
@@ -135,7 +264,7 @@ extract_rho_vec <- function(
   if (is.null(pe)) return(rep(NA_real_, T))
 
   # determine variable names based on model type, default is x, otherwise is wx
-  if (model_type %in% c("riclpm", "riclpm_free_RI_loadings")) {
+  if (model_type == "riclpm") {
     xvar <- "wx"
     yvar <- "wy"
   } else {

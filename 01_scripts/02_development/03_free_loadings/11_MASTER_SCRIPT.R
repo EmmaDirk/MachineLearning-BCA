@@ -83,7 +83,7 @@ source(here("01_scripts", "02_development", "03_free_loadings", "09_simulation_f
 # run a small example simulation study
 results_sim <- run_simulation_study(
   reps        = 200,                                   # replications
-  N           = 1000,                                  # sample size
+  N           = 350,                                   # sample size
   T           = 5,                                     # number of time points
   k           = 3,                                     # number of confounders
   scenarios   = c("constant", "stepwise"),             # D scenarios
@@ -94,15 +94,19 @@ results_sim <- run_simulation_study(
   A           = A,                                     # autoregressive (beta) + cross-lagged (gamma) matrix
   Psi         = Psi,                                   # confounder covariance matrix
   rho_extra   = 0.1,                                   # extra correlation among X_t and Y_t
+
   models_to_run = c(                                   # models to run
     "clpm",
-    "riclpm",
-    "riclpm_free_RI_loadings",
-    "dpm",
-    "dpm_free_loadings",
     "adj",
-    "lbca"
+    "riclpm",
+    "dpm",
+    "riclpm_free",
+    "dpm_free",
+    "lbca",
+    "bca_riclpm",
+    "bca_dpm"
   ),
+
   ci_level    = 0.95,                                  # confidence level
 
   ###########################################################################
@@ -117,7 +121,7 @@ results_sim <- run_simulation_study(
 # step 7: save the results 
 saveRDS(
   results_sim,
-  file = here::here("02_data", "01_research_report","study_3_RR_results.rds")
+  file = here::here("02_data", "01_research_report","study_1_RR_results.rds")
 )
 
 # step 8: produce the plot
@@ -126,8 +130,9 @@ source(here("01_scripts", "02_development", "03_free_loadings", "10_plotting.R")
 
 # produce the plot
 p <- plot_sim_study_results(
-  results_sim = results_sim,
-  true_A      = A
+  results_sim  = results_sim,
+  true_A       = A,
+  only_proper  = TRUE
 )
 
 # print the plot
@@ -135,7 +140,7 @@ print(p$combined_gamma_XY)
 
 # save the plot
 ggsave(
-  filename = here::here("03_output", "01_latest", "RR_study_3_3.png"),
+  filename = here::here("03_output", "01_latest", "free_loadings_plot_350.png"),
   plot     = p$combined_gamma_XY,
   width    = 10,
   height   = 8,

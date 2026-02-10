@@ -13,16 +13,17 @@
 #
 # What the function does:
 # 1) Builds a small "true_params" lookup table mapping each estimand (gamma_XY, gamma_YX, beta_X, beta_Y) to its true value.
-# 2) Reshapes the simulation output from wide to long format for all lagged estimates (occasion >= 2).
-# 3) Parses column names to identify which estimand (beta/gamma) and which method (CLPM, RI-CLPM, DPM, etc.) produced each estimate.
-# 4) Computes, per scenario × occasion × estimand × method:
+# 2) Optionally filters to proper solutions only (per-method) if only_proper = TRUE.
+# 3) Reshapes the simulation output from wide to long format for all lagged estimates (occasion >= 2).
+# 4) Parses column names to identify which estimand (beta/gamma) and which method (CLPM, RI-CLPM, DPM, etc.) produced each estimate.
+# 5) Computes, per scenario × occasion × estimand × method:
 #    - relative bias and its Monte Carlo SE
 #    - RMSE and its Monte Carlo SE
-# 5) Creates two ggplots for gamma_XY (X -> Y): one for relative bias and one for RMSE, faceted by scenario.
-# 6) Returns the plots plus the underlying summary data frames and the method colour palette.
+# 6) Creates two ggplots for gamma_XY (X -> Y): one for relative bias and one for RMSE, faceted by scenario.
+# 7) Returns the plots plus the underlying summary data frames and the method colour palette.
 # -----------------------------------------------------------------------------
 
-plot_sim_study_results <- function(results_sim, true_A) {
+plot_sim_study_results <- function(results_sim, true_A, only_proper = FALSE) {
 
   #####################################################
   # true parameters from the data-generating model
@@ -37,6 +38,57 @@ plot_sim_study_results <- function(results_sim, true_A) {
       true_A[2, 2]   # beta_Y: Y -> Y
     )
   )
+
+  #####################################################
+  # optionally filter to proper solutions only
+  #####################################################
+
+  # mapping from estimate column suffix -> improper flag column
+  improper_map <- c(
+    CLPM            = "improper_CLPM",
+    CLPM_Adj        = "improper_CLPM_Adj",
+    CLPM_LBCA       = "improper_CLPM_LBCA",
+    RI_CLPM         = "improper_RI_CLPM",
+    DPM             = "improper_DPM",
+    RI_CLPM_Free    = "improper_RI_CLPM_Free",
+    DPM_Free        = "improper_DPM_Free",
+    RI_CLPM_BCA     = "improper_RI_CLPM_BCA",
+    DPM_BCA         = "improper_DPM_BCA"
+  )
+
+  # helper: set estimates from improper fits to NA (so they drop out later)
+  apply_only_proper_filter <- function(df) {
+
+    # loop over each method suffix we know about
+    for (suf in names(improper_map)) {
+
+      imp_col <- improper_map[[suf]]
+
+      # skip if the improper column is not present
+      if (!imp_col %in% names(df)) next
+
+      # indices where this method is improper (TRUE)
+      bad <- isTRUE(df[[imp_col]])
+      bad <- !is.na(df[[imp_col]]) & df[[imp_col]]
+
+      # set all lagged estimate columns for this suffix to NA
+      est_cols <- grep(
+        paste0("^est(BetaX|BetaY|GammaXY|GammaYX)_", suf, "$"),
+        names(df),
+        value = TRUE
+      )
+
+      if (length(est_cols) > 0 && any(bad)) {
+        df[bad, est_cols] <- NA_real_
+      }
+    }
+
+    df
+  }
+
+  if (isTRUE(only_proper)) {
+    results_sim <- apply_only_proper_filter(results_sim)
+  }
 
   #####################################################
   # build relative bias data frame
@@ -69,13 +121,15 @@ plot_sim_study_results <- function(results_sim, true_A) {
       method = param %>%
         str_remove("^est(BetaX|BetaY|GammaXY|GammaYX)_") %>%
         recode(
-          CLPM                     = "CLPM",
-          CLPM_Adj                 = "True model",
-          CLPM_LBCA                = "CLPM linear BCA",
-          DPM                      = "DPM",
-          DPM_free_loadings        = "DPM free loadings",
-          RI_CLPM                  = "RI-CLPM",
-          RI_CLPM_free_RI_loadings = "RI-CLPM free RI loadings"
+          CLPM         = "CLPM",
+          CLPM_Adj     = "True model",
+          CLPM_LBCA    = "CLPM linear BCA",
+          DPM          = "DPM",
+          RI_CLPM      = "RI-CLPM",
+          RI_CLPM_Free = "RI-CLPM free loadings",
+          DPM_Free     = "DPM free loadings",
+          RI_CLPM_BCA  = "RI-CLPM BCA",
+          DPM_BCA      = "DPM BCA"
         )
     ) %>%
 
@@ -110,9 +164,11 @@ plot_sim_study_results <- function(results_sim, true_A) {
           "True model",
           "CLPM linear BCA",
           "DPM",
-          "DPM free loadings",
           "RI-CLPM",
-          "RI-CLPM free RI loadings"
+          "DPM free loadings",
+          "RI-CLPM free loadings",
+          "DPM BCA",
+          "RI-CLPM BCA"
         )
       )
     )
@@ -194,8 +250,6 @@ plot_sim_study_results <- function(results_sim, true_A) {
   # Build RMSE data for all lagged parameters
   #####################################################
 
-  # (reuse true_params defined above)
-
   rmse_df <- results_sim %>%
 
     # only occasions with lagged parameters
@@ -223,13 +277,15 @@ plot_sim_study_results <- function(results_sim, true_A) {
       method = param %>%
         str_remove("^est(BetaX|BetaY|GammaXY|GammaYX)_") %>%
         recode(
-          CLPM                     = "CLPM",
-          CLPM_Adj                 = "True model",
-          CLPM_LBCA                = "CLPM linear BCA",
-          DPM                      = "DPM",
-          DPM_free_loadings        = "DPM free loadings",
-          RI_CLPM                  = "RI-CLPM",
-          RI_CLPM_free_RI_loadings = "RI-CLPM free RI loadings"
+          CLPM         = "CLPM",
+          CLPM_Adj     = "True model",
+          CLPM_LBCA    = "CLPM linear BCA",
+          DPM          = "DPM",
+          RI_CLPM      = "RI-CLPM",
+          RI_CLPM_Free = "RI-CLPM free loadings",
+          DPM_Free     = "DPM free loadings",
+          RI_CLPM_BCA  = "RI-CLPM BCA",
+          DPM_BCA      = "DPM BCA"
         )
     ) %>%
 
@@ -264,9 +320,11 @@ plot_sim_study_results <- function(results_sim, true_A) {
           "True model",
           "CLPM linear BCA",
           "DPM",
-          "DPM free loadings",
           "RI-CLPM",
-          "RI-CLPM free RI loadings"
+          "DPM free loadings",
+          "RI-CLPM free loadings",
+          "DPM BCA",
+          "RI-CLPM BCA"
         )
       )
     )
