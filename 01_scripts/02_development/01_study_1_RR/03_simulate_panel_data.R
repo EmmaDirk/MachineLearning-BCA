@@ -47,7 +47,7 @@ simulate_panel_data <- function(
 
       # innovations covariance implied by stationarity:
       # S_dyn = A S_dyn A' + Sigma_e_c
-      Sigma_e_c <- S_dyn_c - t(A) %*% S_dyn_c %*% A
+      Sigma_e_c <- S_dyn_c - A %*% S_dyn_c %*% t(A)
 
       # ensure symmetry
       Sigma_e_c <- (Sigma_e_c + t(Sigma_e_c)) / 2
@@ -135,7 +135,7 @@ simulate_panel_data <- function(
 
     # innovations covariance from stationarity:
     # S_dyn = A S_dyn A' + Sigma_e
-    Sigma_e_t <- S_dyn_t - t(A) %*% S_dyn_t %*% A
+    Sigma_e_t <- S_dyn_t - A %*% S_dyn_t %*% t(A)
 
     # ensure symmetry
     Sigma_e_t <- (Sigma_e_t + t(Sigma_e_t))/2
