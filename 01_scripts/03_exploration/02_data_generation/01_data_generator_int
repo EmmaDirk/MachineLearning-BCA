@@ -1,4 +1,0 @@
-# We have a couple of wishes for our data generators:
-# - The variance of all variables is 1, such that effects can be interpreted as standardized effects.
-# - We can add interaction terms between variables to the data, but they need not be orthogonal to the main effects.
-# - 
