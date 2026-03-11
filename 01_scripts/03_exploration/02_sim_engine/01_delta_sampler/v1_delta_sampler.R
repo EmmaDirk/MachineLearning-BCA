@@ -136,10 +136,10 @@ sample_delta_1 <- function(
     if (all(abs(c(dx, dy)) >= min_abs & abs(c(dx, dy)) <= max_abs)) {
 
       # if so, return the Delta matrix (2 rows: X and Y)
-      D1 <- rbind(dx, dy)
+      Delta1 <- rbind(dx, dy)
 
       # set row names
-      rownames(D1) <- c("X", "Y")
+      rownames(Delta1) <- c("X", "Y")
 
       # set column names:
       # - first k are main effects: c1..ck
@@ -147,7 +147,7 @@ sample_delta_1 <- function(
       if (k_int == 0) {
 
         # only linear terms
-        colnames(D1) <- paste0("c", 1:k)
+        colnames(Delta1) <- paste0("c", 1:k)
 
       } else {
 
@@ -166,10 +166,10 @@ sample_delta_1 <- function(
         } else character(0)
 
         # concatenate main effect names + interaction names
-        colnames(D1) <- c(paste0("c", 1:k), int2_names, int3_names)
+        colnames(Delta1) <- c(paste0("c", 1:k), int2_names, int3_names)
       }
 
-      return(D1)
+      return(Delta1)
     }
   }
 

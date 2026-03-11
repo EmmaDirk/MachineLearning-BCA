@@ -18,7 +18,7 @@
 #    c) R2_interaction > 0 but no interactions toggled on.
 #    d) Interactions toggled on but R2_interaction = 0.
 #    e) k too small for requested interactions.
-#    f) Sigma missing or invalid.
+#    f) Omega11 missing or invalid.
 #
 # 2) That the returned object has the correct structure:
 #    a) A list.
@@ -54,7 +54,7 @@ set.seed(1)
 # ------------------------------------------------------------------------------------------------------------------
 
 # example covariance matrix of the standardized base confounders
-Sigma <- matrix(c(
+Omega11 <- matrix(c(
   1.0, 0.3, 0.2,
   0.3, 1.0, 0.4,
   0.2, 0.4, 1.0
@@ -74,13 +74,13 @@ get_variance_components <- function(delta_row, out, k, include_2way, include_3wa
   d3 <- if (m3 > 0) delta_row[(k + m2 + 1):(k + m2 + m3)] else numeric(0)
 
   # extract Omega blocks
-  Sigma_block   <- out$Omega_blocks$Sigma
+  Omega11_block <- out$Omega_blocks$Omega11
   Omega22_block <- out$Omega_blocks$Omega22
   Omega33_block <- out$Omega_blocks$Omega33
-  OmegaL3_block <- out$Omega_blocks$OmegaL3
+  Omega13_block <- out$Omega_blocks$Omega13
 
   # linear variance contribution
-  A <- as.numeric(t(dL) %*% Sigma_block %*% dL)
+  A <- as.numeric(t(dL) %*% Omega11_block %*% dL)
 
   # 2way interaction variance contribution
   B <- if (m2 > 0) as.numeric(t(d2) %*% Omega22_block %*% d2) else 0
@@ -89,7 +89,7 @@ get_variance_components <- function(delta_row, out, k, include_2way, include_3wa
   C <- if (m3 > 0) as.numeric(t(d3) %*% Omega33_block %*% d3) else 0
 
   # covariance contribution between linear and 3way parts
-  D <- if (m3 > 0) as.numeric(t(dL) %*% OmegaL3_block %*% d3) else 0
+  D <- if (m3 > 0) as.numeric(t(dL) %*% Omega13_block %*% d3) else 0
 
   # return the decomposition exactly as used by the sampler
   list(
@@ -110,7 +110,7 @@ get_variance_components <- function(delta_row, out, k, include_2way, include_3wa
 # a) R2_total outside [0, 1]
 # SHOULD ERROR
 sample_delta_1(k = 3,
-               Sigma = Sigma,
+               Omega11 = Omega11,
                R2_total = 1.1,
                R2_interaction = 0,
                include_2way = FALSE,
@@ -122,7 +122,7 @@ sample_delta_1(k = 3,
 # b) R2_interaction outside [0, 1]
 # SHOULD ERROR
 sample_delta_1(k = 3,
-               Sigma = Sigma,
+               Omega11 = Omega11,
                R2_total = 0.5,
                R2_interaction = 1.1,
                include_2way = FALSE,
@@ -134,7 +134,7 @@ sample_delta_1(k = 3,
 # c) R2_interaction > 0 but no interactions toggled on
 # SHOULD ERROR
 sample_delta_1(k = 3,
-               Sigma = Sigma,
+               Omega11 = Omega11,
                R2_total = 0.5,
                R2_interaction = 0.5,
                include_2way = FALSE,
@@ -146,7 +146,7 @@ sample_delta_1(k = 3,
 # d) Interactions toggled on but R2_interaction = 0
 # SHOULD ERROR
 sample_delta_1(k = 3,
-               Sigma = Sigma,
+               Omega11 = Omega11,
                R2_total = 0.5,
                R2_interaction = 0,
                include_2way = TRUE,
@@ -158,7 +158,7 @@ sample_delta_1(k = 3,
 # e) k too small for requested interactions
 # SHOULD ERROR
 sample_delta_1(k = 2,
-               Sigma = diag(2),
+               Omega11 = diag(2),
                R2_total = 0.5,
                R2_interaction = 0.5,
                include_2way = TRUE,
@@ -167,7 +167,7 @@ sample_delta_1(k = 2,
                max_abs = 1,
                max_tries = 1000000)
 
-# f1) Sigma missing
+# f1) Omega11 missing
 # SHOULD ERROR
 sample_delta_1(k = 3,
                R2_total = 0.5,
@@ -178,16 +178,16 @@ sample_delta_1(k = 3,
                max_abs = 1,
                max_tries = 1000000)
 
-# f2) Sigma not symmetric
+# f2) Omega11 not symmetric
 # SHOULD ERROR
-Sigma_nonsym <- matrix(c(
+Omega11_nonsym <- matrix(c(
   1.0, 0.3, 0.2,
   0.1, 1.0, 0.4,
   0.2, 0.4, 1.0
 ), nrow = 3, byrow = TRUE)
 
 sample_delta_1(k = 3,
-               Sigma = Sigma_nonsym,
+               Omega11 = Omega11_nonsym,
                R2_total = 0.5,
                R2_interaction = 0.5,
                include_2way = TRUE,
@@ -196,16 +196,16 @@ sample_delta_1(k = 3,
                max_abs = 1,
                max_tries = 1000000)
 
-# f3) Sigma diagonal not equal to 1
+# f3) Omega11 diagonal not equal to 1
 # SHOULD ERROR
-Sigma_bad_diag <- matrix(c(
+Omega11_bad_diag <- matrix(c(
   2.0, 0.3, 0.2,
   0.3, 1.0, 0.4,
   0.2, 0.4, 1.0
 ), nrow = 3, byrow = TRUE)
 
 sample_delta_1(k = 3,
-               Sigma = Sigma_bad_diag,
+               Omega11 = Omega11_bad_diag,
                R2_total = 0.5,
                R2_interaction = 0.5,
                include_2way = TRUE,
@@ -227,7 +227,7 @@ sample_delta_1(k = 3,
 # e) correct column naming and ordering.
 # f) Omega and Omega_blocks are returned.
 d <- sample_delta_1(k = 3,
-                    Sigma = Sigma,
+                    Omega11 = Omega11,
                     R2_total = 0.5,
                     R2_interaction = 0.5,
                     include_2way = TRUE,
@@ -306,7 +306,7 @@ all(abs(d$Delta["Y", ]) >= 0 & abs(d$Delta["Y", ]) <= 1)
 
 # stricter example
 d_bounds <- sample_delta_1(k = 3,
-                           Sigma = Sigma,
+                           Omega11 = Omega11,
                            R2_total = 0.5,
                            R2_interaction = 0.5,
                            include_2way = TRUE,
@@ -325,7 +325,7 @@ all(abs(d_bounds$Delta["Y", ]) >= 0.05 & abs(d_bounds$Delta["Y", ]) <= 1)
 
 # sampling should run out of tries
 sample_delta_1(k = 3,
-               Sigma = Sigma,
+               Omega11 = Omega11,
                R2_total = 0.7,
                R2_interaction = 0.5,
                include_2way = TRUE,
@@ -341,7 +341,7 @@ sample_delta_1(k = 3,
 # SHOULD BE TRUE
 set.seed(1)
 d1 <- sample_delta_1(k = 3,
-                     Sigma = Sigma,
+                     Omega11 = Omega11,
                      R2_total = 0.5,
                      R2_interaction = 0.5,
                      include_2way = TRUE,
@@ -352,7 +352,7 @@ d1 <- sample_delta_1(k = 3,
 
 set.seed(1)
 d2 <- sample_delta_1(k = 3,
-                     Sigma = Sigma,
+                     Omega11 = Omega11,
                      R2_total = 0.5,
                      R2_interaction = 0.5,
                      include_2way = TRUE,

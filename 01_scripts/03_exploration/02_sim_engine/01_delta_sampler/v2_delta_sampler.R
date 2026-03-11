@@ -29,7 +29,7 @@
 
 sample_delta_1 <- function(
   k,                             # number of base confounders
-  Sigma,                         # k x k covariance matrix of the base confounders
+  Omega11,                       # k x k covariance matrix of the base confounders
   R2_total,                      # target Var(eta); if Var(X)=1, this equals the target R^2
   R2_interaction = 0,            # fraction of R2_total allocated to the nonlinear bucket
   include_2way = FALSE,          # include all two-way interaction terms
@@ -41,23 +41,23 @@ sample_delta_1 <- function(
 ) {
 
   # ------------------------- input checks -------------------------
-  # if sigma is not a k x k matrix, throw an error
-  if (!is.matrix(Sigma) || nrow(Sigma) != k || ncol(Sigma) != k)
-    stop("Sigma must be a k x k matrix.")
+  # if Omega11 is not a k x k matrix, throw an error
+  if (!is.matrix(Omega11) || nrow(Omega11) != k || ncol(Omega11) != k)
+    stop("Omega11 must be a k x k matrix.")
 
-  # if sigma is not symmetric, throw an error
-  if (!isTRUE(all.equal(Sigma, t(Sigma), tolerance = 1e-12)))
-    stop("Sigma must be symmetric.")
+  # if Omega11 is not symmetric, throw an error
+  if (!isTRUE(all.equal(Omega11, t(Omega11), tolerance = 1e-12)))
+    stop("Omega11 must be symmetric.")
 
-  # if sigma is not positive semidefinite, throw an error
-  ev <- eigen(Sigma, symmetric = TRUE, only.values = TRUE)$values
+  # if Omega11 is not positive semidefinite, throw an error
+  ev <- eigen(Omega11, symmetric = TRUE, only.values = TRUE)$values
   if (any(ev < -eig_tol))
-    stop("Sigma must be positive semidefinite.")
+    stop("Omega11 must be positive semidefinite.")
 
-  # if sigma does not have ones on the diagonal, throw an error
+  # if Omega11 does not have ones on the diagonal, throw an error
   # the base confounders are assumed to be standardized
-  if (!isTRUE(all.equal(diag(Sigma), rep(1, k), tolerance = 1e-12)))
-    stop("Sigma must have 1 on the diagonal because the base confounders are standardized.")
+  if (!isTRUE(all.equal(diag(Omega11), rep(1, k), tolerance = 1e-12)))
+    stop("Omega11 must have 1 on the diagonal because the base confounders are standardized.")
 
   # if R2_total is not between 0 and 1, throw an error
   if (R2_total < 0 || R2_total > 1)
@@ -123,11 +123,11 @@ sample_delta_1 <- function(
   # - T_ijl    = standardized three-way interaction between Ci, Cj, and Cl
   #
   # it should be noted that:
-  # - Sigma:    Cov(Ci, Cj) = Sigma_ij
-  # - Omega_l2: Cov(Ci, Z_ij) = 0
-  # - Omega_22: Cov(Z_ij, Z_pq)
-  # - Omega_l3: Cov(Ci, T_ijl)
-  # - Omega_33: Cov(T_ijl, T_pqr)
+  # - Omega11:  Cov(Ci, Cj) = Omega11_ij
+  # - Omega12:  Cov(Ci, Z_ij) = 0
+  # - Omega22:  Cov(Z_ij, Z_pq)
+  # - Omega13:  Cov(Ci, T_ijl)
+  # - Omega33:  Cov(T_ijl, T_pqr)
 
   # for centered Gaussian variables, the sixth moment equals the sum over all 15 pairings.
   # we precompute those 15 pairings once and reuse them.
@@ -175,7 +175,7 @@ sample_delta_1 <- function(
 
   # compute E[X1 X2 X3 X4 X5 X6] for centered Gaussian variables
   # takes a vector of indices and a covariance matrix of the base confounders
-  sixth_moment_gaussian <- function(idx, Sigma) {
+  sixth_moment_gaussian <- function(idx, Omega11) {
 
     # loop over 15 pairings
     # take the sum of the covariance between the two indices
@@ -187,7 +187,7 @@ sample_delta_1 <- function(
         # find the covariance between the two indices
         prod(vapply(
           pr,
-          function(pa) Sigma[idx[pa[1]], idx[pa[2]]],
+          function(pa) Omega11[idx[pa[1]], idx[pa[2]]],
 
           # where each iteration returns a number
           numeric(1)
@@ -201,15 +201,15 @@ sample_delta_1 <- function(
   # this is written directly as Cov(Z_ij, Z_pq)
   # where i and j are the indices of the first interaction
   # and p and q are the indices of the second interaction
-  cov_Z2 <- function(i, j, p, q, Sigma) {
+  cov_Z2 <- function(i, j, p, q, Omega11) {
 
     # the numerator is the sum of the product of the covariances
-    num <- Sigma[i, p] * Sigma[j, q] +
-           Sigma[i, q] * Sigma[j, p]
+    num <- Omega11[i, p] * Omega11[j, q] +
+           Omega11[i, q] * Omega11[j, p]
 
     # the denominator is the standardizing factor
-    den <- sqrt((1 + Sigma[i, j]^2) *
-                (1 + Sigma[p, q]^2))
+    den <- sqrt((1 + Omega11[i, j]^2) *
+                (1 + Omega11[p, q]^2))
 
     # the covariance is the numerator divided by the denominator
     num / den
@@ -218,27 +218,27 @@ sample_delta_1 <- function(
   # analytic covariance between two standardized three-way interactions
   # this is written directly as Cov(T_ijl, T_pqr)
   # it takes six indices, three for each interaction
-  cov_T3 <- function(i, j, l, p, q, r, Sigma) {
+  cov_T3 <- function(i, j, l, p, q, r, Omega11) {
 
     # the numerator is the sum of the product of the covariances
     # which we can calculate analytically using the sixth moment function
     # as: E[C1 C2 C3 C4 C5 C6]
-    num <- sixth_moment_gaussian(c(i, j, l, p, q, r), Sigma)
+    num <- sixth_moment_gaussian(c(i, j, l, p, q, r), Omega11)
 
     # the denominator is the standardizing factor
     # which is just the variance of the two interactions
     # which can be computed analytically:
     den1 <- 1 +
-      2 * Sigma[i, j]^2 +
-      2 * Sigma[i, l]^2 +
-      2 * Sigma[j, l]^2 +
-      8 * Sigma[i, j] * Sigma[i, l] * Sigma[j, l]
+      2 * Omega11[i, j]^2 +
+      2 * Omega11[i, l]^2 +
+      2 * Omega11[j, l]^2 +
+      8 * Omega11[i, j] * Omega11[i, l] * Omega11[j, l]
 
     den2 <- 1 +
-      2 * Sigma[p, q]^2 +
-      2 * Sigma[p, r]^2 +
-      2 * Sigma[q, r]^2 +
-      8 * Sigma[p, q] * Sigma[p, r] * Sigma[q, r]
+      2 * Omega11[p, q]^2 +
+      2 * Omega11[p, r]^2 +
+      2 * Omega11[q, r]^2 +
+      8 * Omega11[p, q] * Omega11[p, r] * Omega11[q, r]
 
     num / sqrt(den1 * den2)
   }
@@ -247,30 +247,30 @@ sample_delta_1 <- function(
   # this is written directly as Cov(C_a, T_ijl)
   # takes the index of the main effect and the indices of the three-way interaction
   # and the covariance matrix of the base confounders
-  cov_L3 <- function(a, i, j, l, Sigma) {
+  cov_13 <- function(a, i, j, l, Omega11) {
 
     # the numerator is the sum of the product of the covariances
-    num <- Sigma[a, i] * Sigma[j, l] +
-           Sigma[a, j] * Sigma[i, l] +
-           Sigma[a, l] * Sigma[i, j]
+    num <- Omega11[a, i] * Omega11[j, l] +
+           Omega11[a, j] * Omega11[i, l] +
+           Omega11[a, l] * Omega11[i, j]
 
     # the denominator is the standardizing factor
     den <- sqrt(
       1 +
-      2 * Sigma[i, j]^2 +
-      2 * Sigma[i, l]^2 +
-      2 * Sigma[j, l]^2 +
-      8 * Sigma[i, j] * Sigma[i, l] * Sigma[j, l]
+      2 * Omega11[i, j]^2 +
+      2 * Omega11[i, l]^2 +
+      2 * Omega11[j, l]^2 +
+      8 * Omega11[i, j] * Omega11[i, l] * Omega11[j, l]
     )
 
     num / den
   }
 
   # we start by building the covariance matrix of the two-way interactions
-  build_Omega22 <- function(Sigma) {
+  build_Omega22 <- function(Omega11) {
 
     # get all possible pairs
-    P <- all_pairs(nrow(Sigma))
+    P <- all_pairs(nrow(Omega11))
 
     # they are m2 pairs
     m2 <- nrow(P)
@@ -300,7 +300,7 @@ sample_delta_1 <- function(
         p <- P[b, 1]; q <- P[b, 2]
 
         # fill the off-diagonal entry directly as Cov(Z_ij, Z_pq)
-        Omega22[a, b] <- cov_Z2(i, j, p, q, Sigma)
+        Omega22[a, b] <- cov_Z2(i, j, p, q, Omega11)
       }
     }
 
@@ -308,10 +308,10 @@ sample_delta_1 <- function(
   }
 
   # build the covariance matrix of the three-way interactions
-  build_Omega33 <- function(Sigma) {
+  build_Omega33 <- function(Omega11) {
 
     # get all possible triples
-    T <- all_triples(nrow(Sigma))
+    T <- all_triples(nrow(Omega11))
 
     # they are m3 triples
     m3 <- nrow(T)
@@ -341,7 +341,7 @@ sample_delta_1 <- function(
         p <- T[b, 1]; q <- T[b, 2]; r <- T[b, 3]
 
         # fill the off-diagonal entry directly as Cov(T_ijl, T_pqr)
-        Omega33[a, b] <- cov_T3(i, j, l, p, q, r, Sigma)
+        Omega33[a, b] <- cov_T3(i, j, l, p, q, r, Omega11)
       }
     }
 
@@ -349,19 +349,19 @@ sample_delta_1 <- function(
   }
 
   # build the covariance matrix between the main effects and the three-way interactions
-  build_OmegaL3 <- function(Sigma) {
+  build_Omega13 <- function(Omega11) {
 
     # get all possible triples
-    T <- all_triples(nrow(Sigma))
+    T <- all_triples(nrow(Omega11))
 
     # they are m3 triples
     m3 <- nrow(T)
 
     # initialize the k x m3 matrix Omega
-    OmegaL3 <- matrix(0, k, m3)
+    Omega13 <- matrix(0, k, m3)
 
     # if there are no triples, return Omega empty
-    if (m3 == 0) return(OmegaL3)
+    if (m3 == 0) return(Omega13)
 
     # for every triple
     for (t in seq_len(m3)) {
@@ -373,20 +373,20 @@ sample_delta_1 <- function(
       for (a in seq_len(k)) {
 
         # fill the entry directly as Cov(C_a, T_ijl)
-        OmegaL3[a, t] <- cov_L3(a, i, j, l, Sigma)
+        Omega13[a, t] <- cov_13(a, i, j, l, Omega11)
       }
     }
 
-    OmegaL3
+    Omega13
   }
 
   # ------------------------- solve scales -------------------------
   # this function finds two scaling parameters sL (for main effects) and s (for interactions)
   # to transfor the sampled coefficients to the desired R^2 values. 
-  # A = t(bL) %*% Sigma %*% bL
+  # A = t(bL) %*% Omega11 %*% bL
   # B = t(b2) %*% Omega22 %*% b2
   # C = t(b3) %*% Omega33 %*% b3
-  # D = t(bL) %*% OmegaL3 %*% b3
+  # D = t(bL) %*% Omega13 %*% b3
   # which are computed before calling this function
 
   solve_scales <- function(A, B, C, D, Vlin_star, VNL_star) {
@@ -474,17 +474,17 @@ sample_delta_1 <- function(
   }
 
   # ------------------------- covariance blocks -------------------------
-  # these depend only on Sigma, so we compute them once.
+  # these depend only on Omega11, so we compute them once.
   # initialize the Omega matrices
   Omega22 <- matrix(0, m2, m2)
   Omega33 <- matrix(0, m3, m3)
-  OmegaL3 <- matrix(0, k,  m3)
+  Omega13 <- matrix(0, k,  m3)
 
   # compute the Omega matrices if toggled
-  if (include_2way) Omega22 <- build_Omega22(Sigma)
+  if (include_2way) Omega22 <- build_Omega22(Omega11)
   if (include_3way) {
-    Omega33 <- build_Omega33(Sigma)
-    OmegaL3 <- build_OmegaL3(Sigma)
+    Omega33 <- build_Omega33(Omega11)
+    Omega13 <- build_Omega13(Omega11)
   }
 
   # ------------------------- names -------------------------
@@ -514,14 +514,14 @@ sample_delta_1 <- function(
   if (m3 > 0) {
     rownames(Omega33) <- int3_names
     colnames(Omega33) <- int3_names
-    rownames(OmegaL3) <- lin_names
-    colnames(OmegaL3) <- int3_names
+    rownames(Omega13) <- lin_names
+    colnames(Omega13) <- int3_names
   }
 
   # ------------------------- full Omega -------------------------
   # now we can put it all together
-  # this function takes Sigma, Omega22, Omega33, and OmegaL3
-  build_full_Omega <- function(Sigma, Omega22, Omega33, OmegaL3) {
+  # this function takes Omega11, Omega22, Omega33, and Omega13
+  build_full_Omega <- function(Omega11, Omega22, Omega33, Omega13) {
 
     # compute the total number of features
     p_total <- k + nrow(Omega22) + nrow(Omega33)
@@ -534,8 +534,8 @@ sample_delta_1 <- function(
     idx_2  <- if (m2 > 0) (k + 1):(k + m2) else integer(0)
     idx_3  <- if (m3 > 0) (k + m2 + 1):(k + m2 + m3) else integer(0)
 
-    # sigma is the covariance matrix of the standardized main effects
-    Omega[idx_L, idx_L] <- Sigma
+    # Omega11 is the covariance matrix of the standardized main effects
+    Omega[idx_L, idx_L] <- Omega11
 
     # the covariance matrix of the standardized two-way interaction terms
     if (m2 > 0) Omega[idx_2, idx_2] <- Omega22
@@ -545,8 +545,8 @@ sample_delta_1 <- function(
 
     # the covariance matrix between the standardized main effects and standardized three-way interactions
     if (m3 > 0) {
-      Omega[idx_L, idx_3] <- OmegaL3
-      Omega[idx_3, idx_L] <- t(OmegaL3)
+      Omega[idx_L, idx_3] <- Omega13
+      Omega[idx_3, idx_L] <- t(Omega13)
     }
 
     # it should be noted that:
@@ -572,7 +572,7 @@ sample_delta_1 <- function(
     b3 <- if (m3 > 0) b_int[(m2 + 1):(m2 + m3)] else numeric(0)
 
     # A = variance contribution of the linear part
-    A <- as.numeric(t(bL) %*% Sigma %*% bL)
+    A <- as.numeric(t(bL) %*% Omega11 %*% bL)
 
     # B = variance contribution of the 2way interaction part
     B <- if (m2 > 0) {
@@ -586,12 +586,12 @@ sample_delta_1 <- function(
 
     # D = covariance contribution between the linear and 3way parts
     D <- if (m3 > 0) {
-      as.numeric(t(bL) %*% OmegaL3 %*% b3)
+      as.numeric(t(bL) %*% Omega13 %*% b3)
     } else 0
 
     # if there are no interaction terms, scale only the linear part
     if (m_int == 0) {
-      if (A <= 0) stop("A must be > 0; check Sigma.")
+      if (A <= 0) stop("A must be > 0; check Omega11.")
       sL <- sqrt(Vlin_star / A)
       s  <- 0
     } else {
@@ -625,16 +625,16 @@ sample_delta_1 <- function(
       rownames(D1) <- c("X", "Y")
       colnames(D1) <- feature_names
 
-      Omega_full <- build_full_Omega(Sigma, Omega22, Omega33, OmegaL3)
+      Omega_full <- build_full_Omega(Omega11, Omega22, Omega33, Omega13)
 
       return(list(
         Delta = D1,
         Omega = Omega_full,
         Omega_blocks = list(
-          Sigma   = Sigma,
+          Omega11 = Omega11,
           Omega22 = Omega22,
           Omega33 = Omega33,
-          OmegaL3 = OmegaL3
+          Omega13 = Omega13
         )
       ))
     }
