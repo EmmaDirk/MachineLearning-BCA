@@ -51,7 +51,7 @@
 # This guarantees the requested observed covariance structure at every wave.
 # ------------------------------------------------------------------------------------
 
-simulate_panel_data_full <- function(
+simulate_panel_data <- function(
     N,                                                            # number of individuals
     T,                                                            # number of waves
     Phi,                                                          # lag matrix (diagonal elements are autoregressive effects)
