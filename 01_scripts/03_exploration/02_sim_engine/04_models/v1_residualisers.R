@@ -1,0 +1,499 @@
+# In this script we outline essentially what makes BCA SEM exactly that. 
+# we specify the functions that residualise variables X and Y with respect to confounders C.
+#
+# X ~ C + E, where E_x is the residual
+# Y ~ C + E, where E_y is the residual
+#
+# We are interested in replacing X and Y with their residuals E. 
+# We can use multiple functions to model X ~ C, where some are more flexible than others.
+# In this script we outline the following techniques to model that function.
+# - 1) linear regression. 
+# - 2) Extreme Gradient Boosting (XGBoost).
+# - TBA) Penalized Regression (Lasso).
+# - TBA) Tabular Prior Data-Fitted Network (TabPFN).
+# ------------------------------------------------------------------------------------------
+
+# ----------------------------------- 1) linear residualiser -------------------------------
+residualise_panel_linearC <- function(df,
+                                      k = NULL,
+                                      x_prefix = "x",
+                                      y_prefix = "y",
+                                      c_prefix = "c",
+                                      exclude = NULL,
+                                      interaction_order = 1) {
+  
+  # convert to data frame
+  df <- as.data.frame(df)
+  
+  # get column names for x and y variables
+  x_cols <- grep(paste0("^", x_prefix, "\\d+$"), names(df), value = TRUE)
+  y_cols <- grep(paste0("^", y_prefix, "\\d+$"), names(df), value = TRUE)
+  
+  # choose confounders
+  if (is.null(k)) {
+    
+    # use all confounder columns that match the prefix
+    c_cols <- grep(paste0("^", c_prefix, "\\d+$"), names(df), value = TRUE)
+    
+  } else {
+    
+    # use only confounders c1 to ck
+    c_cols <- paste0(c_prefix, 1:k)
+  }
+  
+  # stop if no confounders found
+  if (length(c_cols) == 0)
+    stop("No confounder columns found.")
+  
+  # stop if requested confounders are missing
+  missing_c <- setdiff(c_cols, names(df))
+  if (length(missing_c) > 0)
+    stop("Requested confounder columns not found: ", paste(missing_c, collapse = ", "))
+  
+  # exclude selected confounders if requested
+  if (!is.null(exclude)) {
+    
+    # stop if exclude is not given as character vector of column names
+    if (!is.character(exclude))
+      stop("'exclude' must be a character vector, e.g. exclude = c('c1', 'c2')")
+    
+    # stop if excluded confounders are not found in the data
+    missing_exclude <- setdiff(exclude, names(df))
+    if (length(missing_exclude) > 0)
+      stop("Excluded confounder columns not found: ", paste(missing_exclude, collapse = ", "))
+    
+    # remove excluded confounders from the confounder set
+    c_cols <- setdiff(c_cols, exclude)
+  }
+  
+  # stop if no confounders remain after exclusion
+  if (length(c_cols) == 0)
+    stop("No confounders left after exclusion.")
+  
+  # stop if interaction order is not valid
+  if (!(interaction_order %in% c(1, 2, 3)))
+    stop("'interaction_order' must be 1, 2, or 3.")
+  
+  # build the right-hand side of the formula
+  if (interaction_order == 1) {
+    
+    # main effects only: c1 + c2 + c3 + ...
+    rhs <- paste(c_cols, collapse = " + ")
+    
+  } else {
+    
+    # include all effects up to the chosen interaction order
+    # e.g. (c1 + c2 + c3)^2 gives main effects + all 2-way interactions
+    # e.g. (c1 + c2 + c3)^3 gives main effects + all 2-way + all 3-way interactions
+    rhs <- paste0("(", paste(c_cols, collapse = " + "), ")^", interaction_order)
+  }
+  
+  # function to residualise a single variable against the chosen confounder formula
+  residualise_one <- function(varname) {
+    
+    # create formula varname ~ confounders
+    fml <- as.formula(paste(varname, "~", rhs))
+    
+    # fit linear model and return residuals
+    resid(lm(fml, data = df))
+  }
+  
+  # for each x, residualise against confounders
+  for (x in x_cols) {
+    
+    # replace the x column with its residuals
+    df[[x]] <- residualise_one(x)
+  }
+  
+  # same for y
+  for (y in y_cols) {
+    
+    # replace the y column with its residuals
+    df[[y]] <- residualise_one(y)
+  }
+  
+  # return the residualised data frame
+  df
+}
+
+# ----------------------------------- 2) xgb residualiser -------------------------------
+
+# helper function to build the confounder design matrix for xgboost
+# this is the key fix:
+# - interaction_order = 1 gives only the main effects
+# - interaction_order = 2 gives main effects + all 2-way interactions
+# - interaction_order = 3 gives main effects + all 2-way + all 3-way interactions
+build_xgb_confounder_matrix <- function(df, c_cols, interaction_order = 1) {
+  
+  # stop if interaction order is not valid
+  if (!(interaction_order %in% c(1, 2, 3)))
+    stop("'interaction_order' must be 1, 2, or 3.")
+  
+  # build the right-hand side of the formula
+  if (interaction_order == 1) {
+    
+    # main effects only
+    rhs <- paste(c_cols, collapse = " + ")
+    
+  } else {
+    
+    # include all effects up to the chosen interaction order
+    rhs <- paste0("(", paste(c_cols, collapse = " + "), ")^", interaction_order)
+  }
+  
+  # build design matrix with no intercept
+  # example:
+  # interaction_order = 1 --> c1, c2, c3
+  # interaction_order = 2 --> c1, c2, c3, c1:c2, c1:c3, c2:c3
+  # interaction_order = 3 --> main effects + 2-way + 3-way interactions
+  X <- model.matrix(as.formula(paste("~", rhs, "- 1")), data = df)
+  
+  # return numeric matrix
+  X
+}
+
+# tuning function
+tune_residualise_panel_xgb <- function(
+  df,                                       # data frame
+  k = NULL,                                 # number of confounders
+  x_prefix = "x",                           # prefix for x variables
+  y_prefix = "y",                           # prefix for y variables
+  c_prefix = "c",                           # prefix for c variables
+  exclude = NULL,                           # confounders to exclude
+  interaction_order = 1,                    # interaction order (so 1 uses only main effects)
+  tuning_grid = NULL,                       # COST: grid of hyperparameters to try
+  cv_folds = 5,                             # COST: number of CV folds (stability increases with folds)
+  nrounds_max = 400,                        # COST: maximum number of boosting iterations 
+  early_stopping_rounds = 20,               # COST: early stopping rounds
+  nthread = 1,                              # number of threads (set to 1 always in parallel simulations)
+  seed = 123              
+){
+  
+  # check that xgboost is installed
+  if (!requireNamespace("xgboost", quietly = TRUE))
+    stop("xgboost required.")
+  
+  # convert to data frame
+  df <- as.data.frame(df)
+  
+  # grab column names
+  x_cols <- grep(paste0("^", x_prefix, "\\d+$"), names(df), value = TRUE)
+  y_cols <- grep(paste0("^", y_prefix, "\\d+$"), names(df), value = TRUE)
+  
+  # stop if not enough waves
+  if (length(x_cols) < 2 || length(y_cols) < 2)
+    stop("Need at least 2 waves for tuning.")
+  
+  # ---------------- confounder selection ----------------
+  
+  # choose confounders
+  if (is.null(k)) {
+    
+    # use all confounder columns that match the prefix
+    c_cols <- grep(paste0("^", c_prefix, "\\d+$"), names(df), value = TRUE)
+    
+  } else {
+    
+    # use only confounders c1 to ck
+    c_cols <- paste0(c_prefix, 1:k)
+  }
+  
+  # stop if no confounders found
+  if (length(c_cols) == 0)
+    stop("No confounder columns found.")
+  
+  # stop if requested confounders are missing
+  missing_c <- setdiff(c_cols, names(df))
+  if (length(missing_c) > 0)
+    stop("Requested confounder columns not found: ", paste(missing_c, collapse = ", "))
+  
+  # exclude selected confounders if requested
+  if (!is.null(exclude)) {
+    
+    # stop if exclude is not given as character vector of column names
+    if (!is.character(exclude))
+      stop("'exclude' must be a character vector, e.g. exclude = c('c1', 'c2')")
+    
+    # stop if excluded confounders are not found in the data
+    missing_exclude <- setdiff(exclude, names(df))
+    if (length(missing_exclude) > 0)
+      stop("Excluded confounder columns not found: ", paste(missing_exclude, collapse = ", "))
+    
+    # remove excluded confounders from the confounder set
+    c_cols <- setdiff(c_cols, exclude)
+  }
+  
+  # stop if no confounders remain after exclusion
+  if (length(c_cols) == 0)
+    stop("No confounders left after exclusion.")
+  
+  # build confounder matrix
+  # this now respects interaction_order
+  X <- build_xgb_confounder_matrix(
+    df = df,
+    c_cols = c_cols,
+    interaction_order = interaction_order
+  )
+  
+  # ---------------- default grid ----------------
+  
+  if (is.null(tuning_grid)) {
+    tuning_grid <- expand.grid(
+      eta = c(.05, .1),
+      max_depth = c(2, 3, 4),
+      min_child_weight = c(1, 5),
+      subsample = c(.8, 1),
+      colsample_bytree = c(.8, 1)
+    )
+  }
+  
+  # ---------------- helper function ----------------
+  
+  tune_target <- function(y) {
+    
+    # predict target from confounder matrix
+    dtrain <- xgboost::xgb.DMatrix(X, label = y)
+    
+    # store results
+    results <- vector("list", nrow(tuning_grid))
+    
+    # loop over the various hyperparameters, and store their performance
+    for (i in seq_len(nrow(tuning_grid))) {
+      
+      params <- list(
+        booster = "gbtree",
+        objective = "reg:squarederror",
+        eval_metric = "rmse",
+        eta = tuning_grid$eta[i],
+        max_depth = tuning_grid$max_depth[i],
+        min_child_weight = tuning_grid$min_child_weight[i],
+        subsample = tuning_grid$subsample[i],
+        colsample_bytree = tuning_grid$colsample_bytree[i],
+        nthread = nthread
+      )
+      
+      set.seed(seed)
+      
+      # run CV for each hyperparameter combination
+      cv <- xgboost::xgb.cv(
+        params = params,
+        data = dtrain,
+        nrounds = nrounds_max,
+        nfold = cv_folds,
+        early_stopping_rounds = early_stopping_rounds,
+        verbose = 0
+      )
+      
+      # grab best iteration and score
+      iter <- cv$best_iteration
+      score <- cv$evaluation_log$test_rmse_mean[iter]
+      
+      results[[i]] <- c(
+        params,
+        list(best_iter = iter, score = score)
+      )
+    }
+    
+    # pick best hyperparameter combination
+    scores <- sapply(results, function(x) x$score)
+    best <- results[[which.min(scores)]]
+    
+    list(
+      params = best[names(best) %in% c(
+        "booster", "objective", "eval_metric", "eta", "max_depth",
+        "min_child_weight", "subsample", "colsample_bytree", "nthread"
+      )],
+      nrounds = best$best_iter,
+      score = best$score
+    )
+  }
+  
+  # now we tune for X and Y at t = 1, 2
+  tune_x1 <- tune_target(df[[paste0(x_prefix, 1)]])
+  tune_x2 <- tune_target(df[[paste0(x_prefix, 2)]])
+  tune_y1 <- tune_target(df[[paste0(y_prefix, 1)]])
+  tune_y2 <- tune_target(df[[paste0(y_prefix, 2)]])
+  
+  # and we store the results
+  list(
+    confounders = c_cols,
+    interaction_order = interaction_order,
+    design_colnames = colnames(X),
+    tune_x1 = tune_x1,
+    tune_x2 = tune_x2,
+    tune_y1 = tune_y1,
+    tune_y2 = tune_y2,
+    final = list(
+      x_wave1 = tune_x1,
+      x_wave2plus = tune_x2,
+      y_wave1 = tune_y1,
+      y_wave2plus = tune_y2
+    )
+  )
+}
+
+# training and residualising function
+residualise_panel_xgb <- function(
+  df,                                        # data frame
+  tuning,                                    # tuning results
+  k = NULL,                                  # number of confounders
+  x_prefix = "x",                            # prefix for X variables
+  y_prefix = "y",                            # prefix for Y variables
+  c_prefix = "c",                            # prefix for C variables
+  exclude = NULL,                            # confounders to exclude
+  interaction_order = 1,                     # interaction order (so 1 uses only main effects)
+  oof_folds = 2,                             # number of OOF folds (linear cost increases with folds)
+  nthread = 1,                               # number of threads (set to 1 always in parallel simulations)
+  seed = 123                                 # random seed
+){
+  
+  # check that xgboost is installed
+  if (!requireNamespace("xgboost", quietly = TRUE))
+    stop("xgboost required.")
+  
+  # convert to data frame
+  df <- as.data.frame(df)
+  
+  # grab x and y variables
+  x_cols <- grep(paste0("^", x_prefix, "\\d+$"), names(df), value = TRUE)
+  y_cols <- grep(paste0("^", y_prefix, "\\d+$"), names(df), value = TRUE)
+  
+  # choose confounders
+  if (is.null(k)) {
+    
+    # use all confounder columns that match the prefix
+    c_cols <- grep(paste0("^", c_prefix, "\\d+$"), names(df), value = TRUE)
+    
+  } else {
+    
+    # use only confounders c1 to ck
+    c_cols <- paste0(c_prefix, 1:k)
+  }
+  
+  # stop if no confounders found
+  if (length(c_cols) == 0)
+    stop("No confounder columns found.")
+  
+  # stop if requested confounders are missing
+  missing_c <- setdiff(c_cols, names(df))
+  if (length(missing_c) > 0)
+    stop("Requested confounder columns not found: ", paste(missing_c, collapse = ", "))
+  
+  # exclude selected confounders if requested
+  if (!is.null(exclude)) {
+    
+    # stop if exclude is not given as character vector of column names
+    if (!is.character(exclude))
+      stop("'exclude' must be a character vector, e.g. exclude = c('c1', 'c2')")
+    
+    # stop if excluded confounders are not found in the data
+    missing_exclude <- setdiff(exclude, names(df))
+    if (length(missing_exclude) > 0)
+      stop("Excluded confounder columns not found: ", paste(missing_exclude, collapse = ", "))
+    
+    # remove excluded confounders from the confounder set
+    c_cols <- setdiff(c_cols, exclude)
+  }
+  
+  # stop if no confounders remain after exclusion
+  if (length(c_cols) == 0)
+    stop("No confounders left after exclusion.")
+  
+  # build confounder matrix
+  # this now respects interaction_order
+  X <- build_xgb_confounder_matrix(
+    df = df,
+    c_cols = c_cols,
+    interaction_order = interaction_order
+  )
+  
+  # save sample size
+  n <- nrow(X)
+  
+  # -------- create folds --------
+  
+  set.seed(seed)
+  
+  # create folds
+  folds <- sample(rep(1:oof_folds, length.out = n))
+  
+  # train the model on the folds and return out-of-fold predictions
+  oof_predict <- function(y, params, nrounds) {
+    
+    # create empty vector
+    pred <- numeric(n)
+    
+    # for each fold
+    for (f in 1:oof_folds) {
+      
+      # grab training and test sets
+      train <- folds != f
+      test  <- folds == f
+      
+      # create DMatrix objects
+      dtrain <- xgboost::xgb.DMatrix(X[train, , drop = FALSE], label = y[train])
+      dtest  <- xgboost::xgb.DMatrix(X[test, , drop = FALSE])
+      
+      # enforce thread setting
+      params$nthread <- nthread
+      
+      # train model
+      model <- xgboost::xgb.train(
+        params = params,
+        data = dtrain,
+        nrounds = nrounds,
+        verbose = 0
+      )
+      
+      # grab predictions from held-out fold
+      pred[test] <- predict(model, dtest)
+    }
+    
+    pred
+  }
+  
+  # determine which hyperparameters to use for each variable
+  get_spec <- function(var, prefix) {
+    
+    wave <- as.integer(sub(prefix, "", var))
+    
+    if (prefix == x_prefix) {
+      if (wave == 1) return(tuning$final$x_wave1)
+      return(tuning$final$x_wave2plus)
+    } else {
+      if (wave == 1) return(tuning$final$y_wave1)
+      return(tuning$final$y_wave2plus)
+    }
+  }
+  
+  # -------- residualise X --------
+  
+  for (x in x_cols) {
+    
+    # get hyperparameter specification for this x variable
+    spec <- get_spec(x, x_prefix)
+    
+    # get out-of-fold predictions from confounders
+    pred <- oof_predict(df[[x]], spec$params, spec$nrounds)
+    
+    # replace the x column with its residuals
+    df[[x]] <- df[[x]] - pred
+  }
+  
+  # -------- residualise Y --------
+  
+  for (y in y_cols) {
+    
+    # get hyperparameter specification for this y variable
+    spec <- get_spec(y, y_prefix)
+    
+    # get out-of-fold predictions from confounders
+    pred <- oof_predict(df[[y]], spec$params, spec$nrounds)
+    
+    # replace the y column with its residuals
+    df[[y]] <- df[[y]] - pred
+  }
+  
+  # return the residualised data frame
+  df
+}

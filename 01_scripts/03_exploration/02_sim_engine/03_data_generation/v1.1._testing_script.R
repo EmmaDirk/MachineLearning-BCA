@@ -4,6 +4,7 @@
 # - covariance of confounder features
 # - correctness of Psi_t construction
 # - correctness of M_t recursion
+# - correctness of the state variance equation in vacuum
 # - correctness of implied covariance of (X_t, Y_t)
 # - behavior under k = 1, 2, 3, 4 and different Delta trajectories
 
@@ -16,14 +17,14 @@ library(mvtnorm)
 
 source(here("01_scripts", "03_exploration", "02_sim_engine", "01_delta_sampler", "v2_delta_sampler.R"))
 source(here("01_scripts", "03_exploration", "02_sim_engine", "02_delta_trajectory", "v1_delta_trajectory.R"))
-source(here("01_scripts", "03_exploration", "02_sim_engine", "03_data_generation", "v1_data_generation.R"))
+source(here("01_scripts", "03_exploration", "02_sim_engine", "03_panel_sim", "v1_simulate_panel_data.R"))
 
 ###########################################################################
 # GLOBAL SETUP
 ###########################################################################
 
 N_big <- 200000
-N_small <- 500
+N_small <- 5000
 T_panel <- 5
 
 Sigma <- matrix(c(
@@ -33,7 +34,7 @@ Sigma <- matrix(c(
 
 Phi <- matrix(c(
   0.40, 0.15,
-  0.10, 0
+  0.10, 0.35
 ), nrow = 2, byrow = TRUE)
 
 Sigma
@@ -421,6 +422,144 @@ sim_4$Psi_list[[2]]
 Psi2_manual - sim_4$Psi_list[[2]]
 
 ###########################################################################
+# VACUUM TEST OF THE STATE VARIANCE EQUATION: WAVE 1
+###########################################################################
+
+Delta1_test <- Delta_list_4_const[[1]]
+Omega_full_test <- sim_4$Omega_full
+Psi1_test <- sim_4$Psi_list[[1]]
+
+Delta1_test
+Omega_full_test
+Psi1_test
+
+# reconstruct Var(W1) directly from the model equation
+Var_W1_manual <- Delta1_test %*% Omega_full_test %*% t(Delta1_test) + Psi1_test
+Var_W1_manual
+
+# compare to target Sigma
+Sigma
+Var_W1_manual - Sigma
+
+# same thing, written exactly as in the derivation
+Delta1_test %*% Omega_full_test %*% t(Delta1_test)
+Psi1_test
+Delta1_test %*% Omega_full_test %*% t(Delta1_test) + Psi1_test
+
+###########################################################################
+# VACUUM TEST OF THE STATE VARIANCE EQUATION: WAVE 2
+###########################################################################
+
+Delta2_test <- Delta_list_4_const[[2]]
+M1_test <- sim_4$M_list[[1]]
+Psi2_test <- sim_4$Psi_list[[2]]
+
+Delta2_test
+M1_test
+Psi2_test
+
+# reconstruct Var(W2) term by term
+term_AR_2 <- Phi %*% Sigma %*% t(Phi)
+term_D_2 <- Delta2_test %*% Omega_full_test %*% t(Delta2_test)
+term_cross_2_a <- Phi %*% M1_test %*% t(Delta2_test)
+term_cross_2_b <- Delta2_test %*% t(M1_test) %*% t(Phi)
+
+term_AR_2
+term_D_2
+term_cross_2_a
+term_cross_2_b
+Psi2_test
+
+Var_W2_manual <- term_AR_2 + term_D_2 + term_cross_2_a + term_cross_2_b + Psi2_test
+Var_W2_manual
+
+# compare to target Sigma
+Sigma
+Var_W2_manual - Sigma
+
+###########################################################################
+# VACUUM TEST OF THE STATE VARIANCE EQUATION: WAVES 3, 4, 5
+###########################################################################
+
+# wave 3
+Delta3_test <- Delta_list_4_const[[3]]
+M2_test <- sim_4$M_list[[2]]
+Psi3_test <- sim_4$Psi_list[[3]]
+
+Var_W3_manual <-
+  Phi %*% Sigma %*% t(Phi) +
+  Delta3_test %*% Omega_full_test %*% t(Delta3_test) +
+  Phi %*% M2_test %*% t(Delta3_test) +
+  Delta3_test %*% t(M2_test) %*% t(Phi) +
+  Psi3_test
+
+Var_W3_manual
+Var_W3_manual - Sigma
+
+# wave 4
+Delta4_test <- Delta_list_4_const[[4]]
+M3_test <- sim_4$M_list[[3]]
+Psi4_test <- sim_4$Psi_list[[4]]
+
+Var_W4_manual <-
+  Phi %*% Sigma %*% t(Phi) +
+  Delta4_test %*% Omega_full_test %*% t(Delta4_test) +
+  Phi %*% M3_test %*% t(Delta4_test) +
+  Delta4_test %*% t(M3_test) %*% t(Phi) +
+  Psi4_test
+
+Var_W4_manual
+Var_W4_manual - Sigma
+
+# wave 5
+Delta5_test <- Delta_list_4_const[[5]]
+M4_test <- sim_4$M_list[[4]]
+Psi5_test <- sim_4$Psi_list[[5]]
+
+Var_W5_manual <-
+  Phi %*% Sigma %*% t(Phi) +
+  Delta5_test %*% Omega_full_test %*% t(Delta5_test) +
+  Phi %*% M4_test %*% t(Delta5_test) +
+  Delta5_test %*% t(M4_test) %*% t(Phi) +
+  Psi5_test
+
+Var_W5_manual
+Var_W5_manual - Sigma
+
+###########################################################################
+# VACUUM TEST OF THE STATE VARIANCE EQUATION: ALL WAVES IN ONE LOOP
+###########################################################################
+
+for (t in 1:T_panel) {
+
+  cat("\n==============================\n")
+  cat("wave =", t, "\n")
+  cat("==============================\n")
+
+  Delta_t <- Delta_list_4_const[[t]]
+  Psi_t <- sim_4$Psi_list[[t]]
+
+  if (t == 1) {
+
+    Var_W_t <- Delta_t %*% sim_4$Omega_full %*% t(Delta_t) + Psi_t
+
+  } else {
+
+    M_prev <- sim_4$M_list[[t - 1]]
+
+    Var_W_t <-
+      Phi %*% Sigma %*% t(Phi) +
+      Delta_t %*% sim_4$Omega_full %*% t(Delta_t) +
+      Phi %*% M_prev %*% t(Delta_t) +
+      Delta_t %*% t(M_prev) %*% t(Phi) +
+      Psi_t
+  }
+
+  print(Var_W_t)
+  print(Var_W_t - Sigma)
+}
+
+###########################################################################
 # STEPWISE Delta TRAJECTORY
 ###########################################################################
 
@@ -463,6 +602,80 @@ sim_4_step$Psi_list[[2]]
 sim_4_step$Psi_list[[3]]
 sim_4_step$Psi_list[[4]]
 sim_4_step$Psi_list[[5]]
+
+###########################################################################
+# VACUUM TEST OF THE STATE VARIANCE EQUATION: STEPWISE TRAJECTORY
+###########################################################################
+
+Omega_full_step <- sim_4_step$Omega_full
+
+# wave 1
+Delta1_step <- Delta_list_4_step[[1]]
+Psi1_step <- sim_4_step$Psi_list[[1]]
+
+Var_W1_step <- Delta1_step %*% Omega_full_step %*% t(Delta1_step) + Psi1_step
+Var_W1_step
+Var_W1_step - Sigma
+
+# wave 2
+Delta2_step <- Delta_list_4_step[[2]]
+M1_step <- sim_4_step$M_list[[1]]
+Psi2_step <- sim_4_step$Psi_list[[2]]
+
+Var_W2_step <-
+  Phi %*% Sigma %*% t(Phi) +
+  Delta2_step %*% Omega_full_step %*% t(Delta2_step) +
+  Phi %*% M1_step %*% t(Delta2_step) +
+  Delta2_step %*% t(M1_step) %*% t(Phi) +
+  Psi2_step
+
+Var_W2_step
+Var_W2_step - Sigma
+
+# wave 3
+Delta3_step <- Delta_list_4_step[[3]]
+M2_step <- sim_4_step$M_list[[2]]
+Psi3_step <- sim_4_step$Psi_list[[3]]
+
+Var_W3_step <-
+  Phi %*% Sigma %*% t(Phi) +
+  Delta3_step %*% Omega_full_step %*% t(Delta3_step) +
+  Phi %*% M2_step %*% t(Delta3_step) +
+  Delta3_step %*% t(M2_step) %*% t(Phi) +
+  Psi3_step
+
+Var_W3_step
+Var_W3_step - Sigma
+
+# wave 4
+Delta4_step <- Delta_list_4_step[[4]]
+M3_step <- sim_4_step$M_list[[3]]
+Psi4_step <- sim_4_step$Psi_list[[4]]
+
+Var_W4_step <-
+  Phi %*% Sigma %*% t(Phi) +
+  Delta4_step %*% Omega_full_step %*% t(Delta4_step) +
+  Phi %*% M3_step %*% t(Delta4_step) +
+  Delta4_step %*% t(M3_step) %*% t(Phi) +
+  Psi4_step
+
+Var_W4_step
+Var_W4_step - Sigma
+
+# wave 5
+Delta5_step <- Delta_list_4_step[[5]]
+M4_step <- sim_4_step$M_list[[4]]
+Psi5_step <- sim_4_step$Psi_list[[5]]
+
+Var_W5_step <-
+  Phi %*% Sigma %*% t(Phi) +
+  Delta5_step %*% Omega_full_step %*% t(Delta5_step) +
+  Phi %*% M4_step %*% t(Delta5_step) +
+  Delta5_step %*% t(M4_step) %*% t(Phi) +
+  Psi5_step
+
+Var_W5_step
+Var_W5_step - Sigma
 
 ###########################################################################
 # MIXTURE Delta TRAJECTORY
@@ -511,6 +724,80 @@ sim_4_mix$Psi_list[[2]]
 sim_4_mix$Psi_list[[3]]
 sim_4_mix$Psi_list[[4]]
 sim_4_mix$Psi_list[[5]]
+
+###########################################################################
+# VACUUM TEST OF THE STATE VARIANCE EQUATION: MIXTURE TRAJECTORY
+###########################################################################
+
+Omega_full_mix <- sim_4_mix$Omega_full
+
+# wave 1
+Delta1_mix <- Delta_list_4_mix[[1]]
+Psi1_mix <- sim_4_mix$Psi_list[[1]]
+
+Var_W1_mix <- Delta1_mix %*% Omega_full_mix %*% t(Delta1_mix) + Psi1_mix
+Var_W1_mix
+Var_W1_mix - Sigma
+
+# wave 2
+Delta2_mix <- Delta_list_4_mix[[2]]
+M1_mix <- sim_4_mix$M_list[[1]]
+Psi2_mix <- sim_4_mix$Psi_list[[2]]
+
+Var_W2_mix <-
+  Phi %*% Sigma %*% t(Phi) +
+  Delta2_mix %*% Omega_full_mix %*% t(Delta2_mix) +
+  Phi %*% M1_mix %*% t(Delta2_mix) +
+  Delta2_mix %*% t(M1_mix) %*% t(Phi) +
+  Psi2_mix
+
+Var_W2_mix
+Var_W2_mix - Sigma
+
+# wave 3
+Delta3_mix <- Delta_list_4_mix[[3]]
+M2_mix <- sim_4_mix$M_list[[2]]
+Psi3_mix <- sim_4_mix$Psi_list[[3]]
+
+Var_W3_mix <-
+  Phi %*% Sigma %*% t(Phi) +
+  Delta3_mix %*% Omega_full_mix %*% t(Delta3_mix) +
+  Phi %*% M2_mix %*% t(Delta3_mix) +
+  Delta3_mix %*% t(M2_mix) %*% t(Phi) +
+  Psi3_mix
+
+Var_W3_mix
+Var_W3_mix - Sigma
+
+# wave 4
+Delta4_mix <- Delta_list_4_mix[[4]]
+M3_mix <- sim_4_mix$M_list[[3]]
+Psi4_mix <- sim_4_mix$Psi_list[[4]]
+
+Var_W4_mix <-
+  Phi %*% Sigma %*% t(Phi) +
+  Delta4_mix %*% Omega_full_mix %*% t(Delta4_mix) +
+  Phi %*% M3_mix %*% t(Delta4_mix) +
+  Delta4_mix %*% t(M3_mix) %*% t(Phi) +
+  Psi4_mix
+
+Var_W4_mix
+Var_W4_mix - Sigma
+
+# wave 5
+Delta5_mix <- Delta_list_4_mix[[5]]
+M4_mix <- sim_4_mix$M_list[[4]]
+Psi5_mix <- sim_4_mix$Psi_list[[5]]
+
+Var_W5_mix <-
+  Phi %*% Sigma %*% t(Phi) +
+  Delta5_mix %*% Omega_full_mix %*% t(Delta5_mix) +
+  Phi %*% M4_mix %*% t(Delta5_mix) +
+  Delta5_mix %*% t(M4_mix) %*% t(Phi) +
+  Psi5_mix
+
+Var_W5_mix
+Var_W5_mix - Sigma
 
 ###########################################################################
 # EMPIRICAL CHECK OF STATIONARY WAVE COVARIANCE FOR SMALLER N
