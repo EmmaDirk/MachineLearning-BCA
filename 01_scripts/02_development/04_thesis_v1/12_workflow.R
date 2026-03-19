@@ -86,7 +86,7 @@ free_loadings <- FALSE
 bootstrap_B <- 50
 
 # choose how many worker processes to use
-cores <- max(1L, parallel::detectCores(logical = FALSE) - 1L)
+cores <- 6
 
 # ------------------------------- XGB-related arguments -------------------------------
 
@@ -103,8 +103,8 @@ residualizer_args <- list()
 # ------------------------------- run the study -------------------------------
 
 results_sim <- run_simulation_study(
-  reps = 50,
-  N = 1000,
+  reps = 200,
+  N = 5000,
   T = T_waves,
   k = k,
   Phi = Phi,
@@ -126,18 +126,7 @@ results_sim <- run_simulation_study(
   residualizer_args = residualizer_args
 )
 
-# the long results frame
-results_df <- results_sim$results
+# save the results
+save(results_sim, file = here("03_output", "02_thesis", "01_tests", "01_data","BCALM_CLPM_constant_1c_linear.RData"))
 
-# save the full output list
-saveRDS(
-  results_sim,
-  file = here("02_data", "01_research_report", "study_results_parallel_engine.rds")
-)
-
-# save the long results frame separately as well
-saveRDS(
-  results_df,
-  file = here("02_data", "01_research_report", "study_results_parallel_engine_results_df.rds")
-)
-
+str(results_sim)
