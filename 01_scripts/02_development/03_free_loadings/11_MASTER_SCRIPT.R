@@ -82,8 +82,8 @@ source(here("01_scripts", "02_development", "03_free_loadings", "09_simulation_f
 # run the simulation study
 # run a small example simulation study
 results_sim <- run_simulation_study(
-  reps        = 200,                                   # replications
-  N           = 350,                                   # sample size
+  reps        = 20,                                    # replications
+  N           = 2000,                                  # sample size
   T           = 5,                                     # number of time points
   k           = 3,                                     # number of confounders
   scenarios   = c("constant", "stepwise"),             # D scenarios
@@ -97,14 +97,7 @@ results_sim <- run_simulation_study(
 
   models_to_run = c(                                   # models to run
     "clpm",
-    "adj",
-    "riclpm",
-    "dpm",
-    "riclpm_free",
-    "dpm_free",
-    "lbca",
-    "bca_riclpm",
-    "bca_dpm"
+    "riclpm"
   ),
 
   ci_level    = 0.95,                                  # confidence level

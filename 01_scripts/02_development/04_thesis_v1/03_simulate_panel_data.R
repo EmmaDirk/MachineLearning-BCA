@@ -58,7 +58,6 @@ simulate_panel_data <- function(
     Delta_list,                                                   # list of Delta matrices
     Omega11,                                                      # covariance matrix of base confounders
     Sigma,                                                        # desired covariance matrix of (X_t, Y_t)
-    return_full = FALSE,                                          # if FALSE, return only the simulated data frame
     seed = NULL,                                                  # seed for reproducibility
     eig_tol = 1e-10                                               # tolerance for positive semidefiniteness
 ){
@@ -112,10 +111,10 @@ simulate_panel_data <- function(
   # with linear names of the form c1:cK
   lin_names <- paste0("c",1:k)
 
-  # ------------------------- helper: PSD correction -------------------------
-  # ensures covariance matrices remain positive semidefinite
+  # ------------------------- helper: PSD check -------------------------
+  # checks that covariance matrices are positive semidefinite
 
-  make_psd <- function(S) {
+  check_psd <- function(S) {
 
     # take mean of transpose and itself
     S <- (S + t(S))/2
@@ -126,16 +125,12 @@ simulate_panel_data <- function(
     # extract eigenvalues
     vals <- evd$values
 
-    # correct negative eigenvalues
-    # if abs(eigenvalue) < eig_tol, set to 0
-    vals[vals < 0 & vals > -eig_tol] <- 0
-
     # if any eigenvalue < eig_tol, stop
     if (any(vals < -eig_tol))
       stop("A covariance matrix is not positive semidefinite.")
 
-    # otherwise, return (potentially) corrected matrix
-    evd$vectors %*% diag(vals) %*% t(evd$vectors)
+    # otherwise, return the original symmetrized matrix
+    S
   }
 
   # ------------------------- helper: parse feature name -------------------------
@@ -519,7 +514,7 @@ simulate_panel_data <- function(
   Psi1 <- Sigma - Delta1 %*% Omega_full %*% t(Delta1)
 
   # enforce positive semidefiniteness
-  Psi1 <- make_psd(Psi1)
+  Psi1 <- check_psd(Psi1)
   
   # save psi1
   Psi_list[[1]] <- Psi1
@@ -563,7 +558,7 @@ simulate_panel_data <- function(
       Delta_t %*% t(M_prev) %*% t(Phi)
 
     # enforce positive semidefiniteness
-    Psi_t <- make_psd(Psi_t)
+    Psi_t <- check_psd(Psi_t)
 
     # save Psi
     Psi_list[[t]] <- Psi_t
@@ -606,14 +601,6 @@ simulate_panel_data <- function(
   df[,(2*T+1):(2*T+ncol(C_full))] <- C_full
 
   # ------------------------- return object -------------------------
-  # most downstream code only needs the simulated data.
-  # for that reason, the default return value is now only the data frame.
-  # when you want to inspect the internal covariance objects as well,
-  # set return_full = TRUE.
-
-  if (!isTRUE(return_full)) {
-    return(as.data.frame(df))
-  }
 
   return(list(
 

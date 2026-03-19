@@ -123,6 +123,7 @@ residualise_panel_linearC <- function(df,
 # - interaction_order = 1 gives only the main effects
 # - interaction_order = 2 gives main effects + all 2-way interactions
 # - interaction_order = 3 gives main effects + all 2-way + all 3-way interactions
+
 build_xgb_confounder_matrix <- function(df, c_cols, interaction_order = 1) {
   
   # stop if interaction order is not valid
@@ -152,7 +153,7 @@ build_xgb_confounder_matrix <- function(df, c_cols, interaction_order = 1) {
   X
 }
 
-# tuning function
+# ---------------------------- 2.1) tuning function ------------------------------------
 tune_residualise_panel_xgb <- function(
   df,                                       # data frame
   k = NULL,                                 # number of confounders
@@ -235,7 +236,7 @@ tune_residualise_panel_xgb <- function(
     interaction_order = interaction_order
   )
   
-  # ---------------- default grid ----------------
+  #  default grid 
   
   if (is.null(tuning_grid)) {
     tuning_grid <- expand.grid(
@@ -247,7 +248,7 @@ tune_residualise_panel_xgb <- function(
     )
   }
   
-  # ---------------- helper function ----------------
+  #  helper function 
   
   tune_target <- function(y) {
     
@@ -332,7 +333,7 @@ tune_residualise_panel_xgb <- function(
   )
 }
 
-# training and residualising function
+# ---------------------- 2.2) training and residualising function ------------------------
 residualise_panel_xgb <- function(
   df,                                        # data frame
   tuning,                                    # tuning results
@@ -466,7 +467,7 @@ residualise_panel_xgb <- function(
     }
   }
   
-  # -------- residualise X --------
+  #  residualise X 
   
   for (x in x_cols) {
     
@@ -480,7 +481,7 @@ residualise_panel_xgb <- function(
     df[[x]] <- df[[x]] - pred
   }
   
-  # -------- residualise Y --------
+  # residualise Y 
   
   for (y in y_cols) {
     

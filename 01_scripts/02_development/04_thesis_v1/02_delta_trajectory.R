@@ -16,7 +16,7 @@
 #             finally, we need to rescale the coefficients such that they guarantee new R2 = new_R2. 
 # ---------------------------------------------------------------------
 
-# function (1) to generate Delta trajectory where the coefficients are constant
+# ------------------------------------ 1) constant effects ------------------------------------
 generate_Delta_constant <- function(
     Delta1,                                                       # baseline Delta-matrix
     T                                                             # number of time points
@@ -45,7 +45,7 @@ generate_Delta_constant <- function(
 }
 
 
-# function (2) to generate Delta trajectory with a hard step
+# ------------------------------------ 2) stepwise effects --------------------------------------
 generate_Delta_stepwise <- function(
     Delta1,                                                        # baseline Delta-matrix
     T,                                                             # number of time points
@@ -101,7 +101,8 @@ generate_Delta_stepwise <- function(
   # return the list of Delta matrices
   return(Delta_list)
 }
-# function (3) to generate Delta trajectory with a hard step,
+
+# ------------------------------------ 3) stepwise mixture effects --------------------------------------
 # where the post-step coefficients are a convex mixture of the baseline pattern
 # and a random alternative pattern, followed by exact rescaling so that
 # the variance decomposition into linear and nonlinear parts is preserved
@@ -196,7 +197,7 @@ generate_Delta_stepwise_mixture <- function(
   # covariance matrix between the linear and nonlinear blocks
   Omega_LNL <- if (has_NL) Omega[idx_L, idx_NL, drop = FALSE] else NULL
 
-  # ------------------------- helper to compute quadratic-form variance -------------------------
+  # helper
   # compute the variance of a vector deltas (d) under a covariance matrix (Om)
   qvar <- function(d, Om) {
 

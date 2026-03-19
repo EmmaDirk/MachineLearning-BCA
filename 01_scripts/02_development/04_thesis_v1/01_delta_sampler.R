@@ -1,3 +1,4 @@
+# -----------------------------------------------------------------------------------------------------------------
 # This script contains a function to sample the coefficients with which time-invariant confounders (e.g. age),
 # affect the variables X and Y at time t = 1.
 # Since the autoregessive effects are denoted using beta, and the cross-lagged effects are denoted using gamma,
@@ -41,6 +42,9 @@ sample_delta_1 <- function(
 ) {
 
   # ------------------------- input checks -------------------------
+  #
+  # This part of the script simply checks whether the input arguments are valid.
+
   # if Omega11 is not a k x k matrix, throw an error
   if (!is.matrix(Omega11) || nrow(Omega11) != k || ncol(Omega11) != k)
     stop("Omega11 must be a k x k matrix.")
@@ -91,7 +95,10 @@ sample_delta_1 <- function(
   if (max_abs < min_abs)
     stop("max_abs must be >= min_abs.")
 
-  # ------------------------- dimensions -------------------------
+  # ------------------------- dimensions ---------------------------
+  #
+  # This part of the script computes the number of possible interaction terms.
+
   # if we include interaction terms, we need to compute the number of possible interaction terms.
   # if we include 2way interaction, its number is k choose 2
   m2 <- if (include_2way) choose(k, 2) else 0
@@ -102,14 +109,14 @@ sample_delta_1 <- function(
   # then the total number of interaction terms is m2 + m3
   m_int <- m2 + m3
 
-  # ------------------------- targets -------------------------
+  # targets
   # The target variance of the linear component is (1 - R2_interaction) * R2_total
   Vlin_star <- (1 - R2_interaction) * R2_total
 
   # The target variance of the interaction component is R2_interaction * R2_total
   VNL_star  <- R2_interaction * R2_total
 
-  # ------------------------- helpers -------------------------
+  # helpers
   # makes the index names: 1:2, 1:3, 2:3, ...
   all_pairs <- function(k) t(combn(seq_len(k), 2))
 
@@ -117,6 +124,9 @@ sample_delta_1 <- function(
   all_triples <- function(k) t(combn(seq_len(k), 3))
 
   # ------------------------- covariance objects -------------------------
+  #
+  # In this part we compute every part of the covariance matrix Omega. 
+
   # These functions work directly with the final standardized variables:
   # - Ci       = standardized base confounder i
   # - Z_ij     = standardized two-way interaction between Ci and Cj
@@ -129,6 +139,7 @@ sample_delta_1 <- function(
   # - Omega13:  Cov(Ci, T_ijl)
   # - Omega33:  Cov(T_ijl, T_pqr)
 
+  # Helper: 
   # for centered Gaussian variables, the sixth moment equals the sum over all 15 pairings.
   # we precompute those 15 pairings once and reuse them.
   # this is basically just a helper to build the indices
@@ -173,6 +184,7 @@ sample_delta_1 <- function(
     rec(1:6)
   })
 
+  # Helper:
   # compute E[X1 X2 X3 X4 X5 X6] for centered Gaussian variables
   # takes a vector of indices and a covariance matrix of the base confounders
   sixth_moment_gaussian <- function(idx, Omega11) {
@@ -380,9 +392,9 @@ sample_delta_1 <- function(
     Omega13
   }
 
-  # ------------------------- solve scales -------------------------
+  # ---------------------------- solve scales -------------------------------
   # this function finds two scaling parameters sL (for main effects) and s (for interactions)
-  # to transfor the sampled coefficients to the desired R^2 values. 
+  # to transform the sampled coefficients to the desired R^2 values. 
   # A = t(bL) %*% Omega11 %*% bL
   # B = t(b2) %*% Omega22 %*% b2
   # C = t(b3) %*% Omega33 %*% b3
@@ -473,7 +485,7 @@ sample_delta_1 <- function(
     list(sL = sL, s = s, r = r)
   }
 
-  # ------------------------- covariance blocks -------------------------
+  #  ----------------------- covariance blocks ----------------------------
   # these depend only on Omega11, so we compute them once.
   # initialize the Omega matrices
   Omega22 <- matrix(0, m2, m2)
@@ -487,7 +499,7 @@ sample_delta_1 <- function(
     Omega13 <- build_Omega13(Omega11)
   }
 
-  # ------------------------- names -------------------------
+  # names 
   # if toggled, we need to name the Omega matrices
   # function to generate the names for the 2-way interactions
   int2_names <- if (include_2way) {
@@ -518,7 +530,7 @@ sample_delta_1 <- function(
     colnames(Omega13) <- int3_names
   }
 
-  # ------------------------- full Omega -------------------------
+  # full Omega 
   # now we can put it all together
   # this function takes Omega11, Omega22, Omega33, and Omega13
   build_full_Omega <- function(Omega11, Omega22, Omega33, Omega13) {
