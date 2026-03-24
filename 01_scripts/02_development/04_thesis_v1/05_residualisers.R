@@ -166,7 +166,7 @@ tune_residualise_panel_xgb <- function(
   cv_folds = 5,                             # COST: number of CV folds (stability increases with folds)
   nrounds_max = 400,                        # COST: maximum number of boosting iterations 
   early_stopping_rounds = 20,               # COST: early stopping rounds
-  nthread = 1,                              # number of threads (set to 1 always in parallel simulations)
+  nthread = 1,                              # number of threads for tuning (can be > 1 because tuning is done before the simulation workers start)
   seed = 123              
 ){
   
@@ -250,50 +250,51 @@ tune_residualise_panel_xgb <- function(
   
   #  helper function 
   
-  tune_target <- function(y) {
+  tune_target <- function(y, target_name = "target") {
     
     # predict target from confounder matrix
     dtrain <- xgboost::xgb.DMatrix(X, label = y)
     
-    # store results
-    results <- vector("list", nrow(tuning_grid))
+    message(sprintf("Tuning XGBoost for %s", target_name))
     
-    # loop over the various hyperparameters, and store their performance
-    for (i in seq_len(nrow(tuning_grid))) {
-      
-      params <- list(
-        booster = "gbtree",
-        objective = "reg:squarederror",
-        eval_metric = "rmse",
-        eta = tuning_grid$eta[i],
-        max_depth = tuning_grid$max_depth[i],
-        min_child_weight = tuning_grid$min_child_weight[i],
-        subsample = tuning_grid$subsample[i],
-        colsample_bytree = tuning_grid$colsample_bytree[i],
-        nthread = nthread
-      )
-      
-      set.seed(seed)
-      
-      # run CV for each hyperparameter combination
-      cv <- xgboost::xgb.cv(
-        params = params,
-        data = dtrain,
-        nrounds = nrounds_max,
-        nfold = cv_folds,
-        early_stopping_rounds = early_stopping_rounds,
-        verbose = 0
-      )
-      
-      # grab best iteration and score
-      iter <- cv$best_iteration
-      score <- cv$evaluation_log$test_rmse_mean[iter]
-      
-      results[[i]] <- c(
-        params,
-        list(best_iter = iter, score = score)
-      )
-    }
+    results <- pbapply::pblapply(
+      X = seq_len(nrow(tuning_grid)),
+      FUN = function(i) {
+        
+        params <- list(
+          booster = "gbtree",
+          objective = "reg:squarederror",
+          eval_metric = "rmse",
+          eta = tuning_grid$eta[i],
+          max_depth = tuning_grid$max_depth[i],
+          min_child_weight = tuning_grid$min_child_weight[i],
+          subsample = tuning_grid$subsample[i],
+          colsample_bytree = tuning_grid$colsample_bytree[i],
+          nthread = nthread
+        )
+        
+        set.seed(seed)
+        
+        # run CV for each hyperparameter combination
+        cv <- xgboost::xgb.cv(
+          params = params,
+          data = dtrain,
+          nrounds = nrounds_max,
+          nfold = cv_folds,
+          early_stopping_rounds = early_stopping_rounds,
+          verbose = 0
+        )
+        
+        # grab best iteration and score
+        iter <- cv$best_iteration
+        score <- cv$evaluation_log$test_rmse_mean[iter]
+        
+        c(
+          params,
+          list(best_iter = iter, score = score)
+        )
+      }
+    )
     
     # pick best hyperparameter combination
     scores <- sapply(results, function(x) x$score)
@@ -310,10 +311,10 @@ tune_residualise_panel_xgb <- function(
   }
   
   # now we tune for X and Y at t = 1, 2
-  tune_x1 <- tune_target(df[[paste0(x_prefix, 1)]])
-  tune_x2 <- tune_target(df[[paste0(x_prefix, 2)]])
-  tune_y1 <- tune_target(df[[paste0(y_prefix, 1)]])
-  tune_y2 <- tune_target(df[[paste0(y_prefix, 2)]])
+  tune_x1 <- tune_target(df[[paste0(x_prefix, 1)]], target_name = paste0(x_prefix, 1))
+  tune_x2 <- tune_target(df[[paste0(x_prefix, 2)]], target_name = paste0(x_prefix, 2))
+  tune_y1 <- tune_target(df[[paste0(y_prefix, 1)]], target_name = paste0(y_prefix, 1))
+  tune_y2 <- tune_target(df[[paste0(y_prefix, 2)]], target_name = paste0(y_prefix, 2))
   
   # and we store the results
   list(
@@ -344,7 +345,7 @@ residualise_panel_xgb <- function(
   exclude = NULL,                            # confounders to exclude
   interaction_order = 1,                     # interaction order (so 1 uses only main effects)
   oof_folds = 2,                             # number of OOF folds (linear cost increases with folds)
-  nthread = 1,                               # number of threads (set to 1 always in parallel simulations)
+  nthread = 1,                               # number of threads for fitting (keep at 1 when the outer simulation already uses parallel cores)
   seed = 123                                 # random seed
 ){
   

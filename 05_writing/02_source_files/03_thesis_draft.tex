@@ -1,0 +1,83 @@
+\documentclass{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{geometry}
+\usepackage{setspace}
+\usepackage{natbib}
+\usepackage[justification=raggedright,singlelinecheck=false]{caption}
+\usepackage{booktabs}
+\usepackage{makecell}
+\usepackage{float}
+\usepackage{placeins}
+\usepackage{longtable}
+\setlength{\textfloatsep}{10pt}
+\usepackage{caption}
+\doublespacing
+
+\begin{document}
+	
+	\newgeometry{margin=2.5cm} 
+	\begin{titlepage}
+		\begin{doublespace}
+			\centering
+			
+			\vspace*{3cm}
+			{\huge \textbf{Thesis draft}\par}
+			\vspace{1cm}
+			
+			{\Large Combining Flexible Models and Latent Variable Approaches for Baseline Covariate Adjustment in Longitudinal Models.}
+			\vspace{2cm}
+			
+			{\large Mano (E.D.) van Holten\par}
+			{\large Student no.\ 7776632\par}
+			\vspace{1cm}
+			
+			{\large \textit{Program:}\par}
+			{\large \textit{Methods and Statistics for the Biomedical Behavioural and Social Sciences (MSBBSS)}\par}
+			\vspace{1cm}
+			
+			{\large \textbf{Supervisors:}\par}
+			{\large Dr.\ Jeroen D.\ Mulder\par}
+			{\large Prof.\ Dr.\ Ellen L.\ Hamaker\par}
+			\vspace{1cm}
+			
+			{\large \textbf{Target Journal:}\par}
+			{\large Advances in Methods and Practices in Psychological Science\par}
+			\vspace{1cm}
+			
+			\vfill
+			\begin{flushright}
+				{\large Wordcount: 2497 \par}
+				{\large FETC approved:\ 24-0286\par}
+			\end{flushright}
+		\end{doublespace}
+	\end{titlepage}
+	\restoregeometry
+	
+	\section{Introduction}
+	Researchers in behavioral and psychological research are often interested in how two variables influence one another over time \citep{usami2019unified}. Suppose a researcher is interested in the causal effect of a football player's self-confidence ($X$) on later performance ($Y$), and vice versa. Figure \ref{fig:dag}, displays an assumed causal structure between repeated measures of $X_{t}$ and $Y_t$. Suppose now that the researcher has collected a random sample of football players and is looking to analyze his/her data. Psychologists frequently use so-called Cross-Lagged Panel Models (CLPM) to analyze such data (see Figure TBA). In such a model, a variable $X_t$ is predicted by $X_{t-1}$ and $Y_{t-1}$. The estimate of the effect of $X_{t-1}$ on $X_t$ is called the auto-regressive parameter. The effect of $X_{t-1}$ on $Y_t$ (and vice versa) is called the cross-lagged parameter, and is the estimate that our example researcher is interested in. 
+	
+	\begin{figure}[h!]
+		\centering
+		\includegraphics[width=0.9\textwidth]{Pictures/DAG.png}
+		\caption{The data-generating mechanism, with a set of common causes ($C$).}
+		\label{fig:dag}
+	\end{figure}
+	
+	\noindent
+	A key threat to such an observational study are confounders: common causes of both self-confidence and performance. For example, older, more experienced players may better understand their own abilities, which increases their confidence and also leads to stronger match performance. Age and other covariates, which do not meaningfully change over the course of a study, are referred to as baseline confounders ($C$). In contrast, time-varying confounders are common causes that do change over the course of a study. An example could be a player sustaining an injury. In this thesis, we focus solely on time-invariant confounders. 
+	
+	\noindent
+	There are various ways in which researchers can remedy baseline confounding, which can be broadly categorized in two groups: explicit control and control with tricks. The former refers to any technique where the confounders are observed, and their effect on each measurement occasion is modeled. In the context of Structural Equation Models (SEM), this is often done by adding the control variables to the outcome model [reference]. Other approaches separate the confounder model from the causal model, for example in Marginal Structural Models that use Inverse Probability Weighting, often used in biostatistics [reference]. The latter is rather popular in psychology, with models such as the Random Intercepts (RI) CLPM  \citep{hamaker2015critique}, and reciprocal versions of the Dynamic Panel Model (DPM) \citep{dishop2022tutorial}. The RI-CLPM separates stable between-person differences (traits) from within-person dynamics. Although it was not designed for confounder control, the RI-CLPM can act as a workaround for baseline confounding. Baseline confounders are not modeled explicitly, but are absorbed into latent variables that capture stable interpersonal differences (e.g., age). A similar approach is the DPM, which originates in the econometric literature and has been adapted for estimation within the Structural Equation Modeling (SEM) framework \citep{allison2017maximum}. We should also note that latent variable approaches have become a popular tool for causal inference, and have been integrated with the SEM framework [reference]. 
+	
+	\noindent
+	
+	
+	
+	\FloatBarrier
+	\bibliographystyle{apalike}
+	\bibliography{bibliography}
+	
+	
+\end{document}

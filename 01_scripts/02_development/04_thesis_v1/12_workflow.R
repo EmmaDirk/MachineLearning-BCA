@@ -7,7 +7,7 @@
 # This version is the parallel master script:
 # - it is intended to be the script you run for larger studies
 # - it uses the parallel branch in run_simulation_study()
-# - it keeps XGB-related objects empty when the chosen residualiser is not XGB
+# - here we use XGB residualisation and fit a CLPM
 # -------------------------------------------------------------------------------------------------
 
 library(here)
@@ -26,7 +26,7 @@ source(here("01_scripts", "02_development", "04_thesis_v1", "09_one_replication_
 source(here("01_scripts", "02_development", "04_thesis_v1", "10_simulation_function.R"))
 
 # reproducibility
-set.seed(1234)
+set.seed(1233)
 
 # ------------------------------- data-generating mechanism -------------------------------
 
@@ -72,39 +72,55 @@ Sigma <- matrix(c(
 # ------------------------------- analysis choices -------------------------------
 
 # choose exactly one residualiser and exactly one SEM
-residualizer <- "linear"   # "none", "linear", or "xgb"
+residualizer <- "xgb"      # "none", "linear", or "xgb"
 sem_model    <- "clpm"     # "clpm", "riclpm", or "dpm"
 
 # analyst-side confounder choices shared across the pipeline where relevant
 confounder_order <- 1
 exclude <- NULL
 
-# only relevant for RI-CLPM and DPM
+# relevant for RI-CLPM and DPM
 free_loadings <- FALSE
 
-# number of bootstrap resamples used for two-stage methods
-bootstrap_B <- 50
+# bootstrap SEs are only relevant for two-stage methods
+bootstrap_B <- 25
 
 # choose how many worker processes to use
-cores <- 6
+cores <- 7
 
-# ------------------------------- XGB-related arguments -------------------------------
+# ------------------------------- XGB arguments -------------------------------
 
-# when residualizer is not XGB, leave XGB-related objects empty
-# the simulation function now checks this explicitly
-tune_xgb <- FALSE
+# cheap tuning setup
+tune_xgb <- TRUE
 xgb_tuning <- NULL
-xgb_tune_args <- list()
 
-# extra arguments passed only to the chosen residualiser during fitting
-# for the linear residualiser, no extra arguments are needed here
-residualizer_args <- list()
+xgb_tune_args <- list(
+  tuning_grid = expand.grid(
+    eta = c(0.05, 0.10),
+    max_depth = c(2, 3),
+    min_child_weight = c(1, 5),
+    subsample = 0.8,
+    colsample_bytree = 0.8
+  ),
+  cv_folds = 3,
+  nrounds_max = 150,
+  early_stopping_rounds = 10,
+  nthread = 1,
+  seed = 123
+)
+
+# cheap fitting / residualising setup
+residualizer_args <- list(
+  oof_folds = 2,
+  nthread = 1,
+  seed = 123
+)
 
 # ------------------------------- run the study -------------------------------
 
 results_sim <- run_simulation_study(
-  reps = 200,
-  N = 5000,
+  reps = 100,
+  N = 300,
   T = T_waves,
   k = k,
   Phi = Phi,
@@ -127,6 +143,10 @@ results_sim <- run_simulation_study(
 )
 
 # save the results
-save(results_sim, file = here("03_output", "02_thesis", "01_tests", "01_data","BCALM_CLPM_constant_1c_linear.RData"))
-
-str(results_sim)
+saveRDS(
+  results_sim,
+  file = here(
+    "03_output", "02_thesis", "01_tests", "01_data",
+    "03_BCAXGB_CLPM_constant_1c_linear_300.rds"
+  )
+)

@@ -222,6 +222,8 @@ run_simulation_study <- function(
   # one-time XGB tuning, only if the chosen residualiser actually needs it
   if (residualizer == "xgb" && is.null(xgb_tuning) && isTRUE(tune_xgb)) {
 
+    message("Stage 1/2: tuning XGBoost")
+
     # simulate one pilot data set under the same data-generating mechanism
     sim_pilot <- simulate_panel_data(
       N = N,
@@ -259,6 +261,8 @@ run_simulation_study <- function(
   if (residualizer == "xgb" && is.null(xgb_tuning)) {
     stop("XGB residualisation requires xgb_tuning, or tune_xgb = TRUE.")
   }
+
+  message("Stage 2/2: running simulation replications")
 
   # helper that runs one replication
   run_rep <- function(r) {
@@ -315,6 +319,7 @@ run_simulation_study <- function(
       varlist = c(
         "simulate_panel_data",
         "residualise_panel_linearC",
+        "build_xgb_confounder_matrix",
         "tune_residualise_panel_xgb",
         "residualise_panel_xgb",
         "build_clpm",
