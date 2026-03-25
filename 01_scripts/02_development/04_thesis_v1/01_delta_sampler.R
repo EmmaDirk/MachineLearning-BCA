@@ -11,7 +11,7 @@
 # The argument k refers to the number of base confounders (main effects): c1..ck.
 # Interaction terms are only included when requested via toggles:
 # - include_2way: include every possible two-way interaction (e.g. c1:c2, c1:c3, ...)
-# - include_3way: include every possible three-way interaction (e.g. c1:c2:c3, c1:c2:c4, ...)
+# - include_3way: include every possible three-way interaction (e.g. c1:c2:c4, ...)
 #
 # The interaction variance is allocated across whichever interaction terms are included by these toggles.
 # If interaction terms are requested, but the interaction variance is zero, the function throws an error.
@@ -35,6 +35,7 @@ sample_delta_1 <- function(
   R2_interaction = 0,            # fraction of R2_total allocated to the nonlinear bucket
   include_2way = FALSE,          # include all two-way interaction terms
   include_3way = FALSE,          # include all three-way interaction terms
+  force_positive = FALSE,        # ensure all sampled coefficients are positive
   min_abs = 0,                   # minimum allowed absolute coefficient size
   max_abs = 1,                   # maximum allowed absolute coefficient size
   max_tries = 100000,            # maximum number of resampling attempts
@@ -578,6 +579,12 @@ sample_delta_1 <- function(
 
     # sample a random direction for the interaction coefficients
     b_int <- if (m_int > 0) rnorm(m_int) else numeric(0)
+
+    # if toggled, force all sampled coefficients to be positive
+    if (force_positive) {
+      bL <- abs(bL)
+      if (m_int > 0) b_int <- abs(b_int)
+    }
 
     # split the interaction coefficients into the 2way and 3way parts
     b2 <- if (m2 > 0) b_int[1:m2] else numeric(0)
