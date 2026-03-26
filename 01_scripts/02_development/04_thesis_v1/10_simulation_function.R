@@ -320,6 +320,7 @@ run_simulation_study <- function(
         "simulate_panel_data",
         "residualise_panel_linearC",
         "build_xgb_confounder_matrix",
+        "make_group_folds",
         "tune_residualise_panel_xgb",
         "residualise_panel_xgb",
         "build_clpm",

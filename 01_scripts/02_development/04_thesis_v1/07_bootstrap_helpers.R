@@ -78,6 +78,11 @@ bootstrap_pipeline_se <- function(
   # optional reproducibility
   if (!is.null(seed)) set.seed(seed)
 
+  # ensure that each original row carries a stable id through the bootstrap
+  if (!(".id_orig" %in% names(df))) {
+    df$.id_orig <- seq_len(nrow(df))
+  }
+
   # storage for bootstrap estimates; occasion 1 stays NA by design
   ARX <- matrix(NA_real_, nrow = B, ncol = T)
   ARY <- matrix(NA_real_, nrow = B, ncol = T)
