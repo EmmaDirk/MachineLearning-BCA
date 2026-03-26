@@ -92,7 +92,9 @@ validate_residualizer_call <- function(
   linear_allowed <- c(
     "x_prefix",
     "y_prefix",
-    "c_prefix"
+    "c_prefix",
+    "oof_folds",
+    "seed"
   )
 
   xgb_allowed <- c(

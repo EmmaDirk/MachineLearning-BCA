@@ -58,7 +58,9 @@ validate_simulation_inputs <- function(
   linear_allowed <- c(
     "x_prefix",
     "y_prefix",
-    "c_prefix"
+    "c_prefix",
+    "oof_folds",
+    "seed"
   )
 
   # allowed arguments for the XGB residualiser
@@ -259,13 +261,14 @@ run_simulation_study <- function(
 
   # if XGB was requested but tuning is still missing, stop clearly
   if (residualizer == "xgb" && is.null(xgb_tuning)) {
-    stop("XGB residualisation requires xgb_tuning, or tune_xgb = TRUE.")
+    stop("XGB residualisation requested, but no tuning object is available.")
   }
 
-  message("Stage 2/2: running simulation replications")
+  # create deterministic replication seeds
+  rep_seeds <- base_seed + seq_len(reps)
 
-  # helper that runs one replication
-  run_rep <- function(r) {
+  # run one replication
+  run_one <- function(r) {
     run_one_replication(
       R = r,
       N = N,
@@ -282,110 +285,73 @@ run_simulation_study <- function(
       free_loadings = free_loadings,
       bootstrap_B = bootstrap_B,
       bootstrap_seed = if (is.null(bootstrap_seed)) NULL else bootstrap_seed + r,
+      seed = rep_seeds[r],
       xgb_tuning = xgb_tuning,
-      residualizer_args = residualizer_args,
-      seed = base_seed + r
+      residualizer_args = residualizer_args
     )
   }
 
-  # sequential path
+  # run sequentially or in parallel
   if (cores == 1L) {
 
-    out_list <- pbapply::pblapply(
+    results_list <- pbapply::pblapply(
       X = seq_len(reps),
-      FUN = run_rep
+      FUN = run_one
     )
-
-    results_df <- dplyr::bind_rows(out_list)
 
   } else {
 
-    # parallel path
-    cl <- parallel::makeCluster(cores, type = "PSOCK")
+    cl <- parallel::makeCluster(cores)
     on.exit(parallel::stopCluster(cl), add = TRUE)
 
-    # reproducible RNG streams on workers
-    parallel::clusterSetRNGStream(cl, iseed = base_seed)
-
-    # load required packages on each worker
     parallel::clusterEvalQ(cl, {
       library(lavaan)
+      library(pbapply)
+      library(xgboost)
       NULL
     })
 
-    # export all functions and objects needed by workers
     parallel::clusterExport(
-      cl,
-      varlist = c(
-        "simulate_panel_data",
-        "residualise_panel_linearC",
-        "build_xgb_confounder_matrix",
-        "make_group_folds",
-        "tune_residualise_panel_xgb",
-        "residualise_panel_xgb",
-        "build_clpm",
-        "build_riclpm",
-        "build_dpm",
-        "rename_feature_columns_for_lavaan",
-        "rename_exclude_for_lavaan",
-        "safe_fit_lavaan",
-        "validate_residualizer_call",
-        "apply_residualizer",
-        "build_sem_model_string",
-        "fit_analysis_pipeline",
-        "classify_fit_flag",
-        "uses_bootstrap_se",
-        "bootstrap_pipeline_se",
-        "extract_lagged_estimates",
-        "extract_true_lagged_parameters",
-        "extract_bic",
-        "encode_sem_model",
-        "encode_residualizer",
-        "collapse_exclusion",
-        "compute_effective_c_order",
-        "make_failed_replication_frame",
-        "run_one_replication",
-        "N", "T", "k", "Phi", "Sigma", "Omega11", "Delta_list",
-        "residualizer", "sem_model", "confounder_order", "exclude",
-        "free_loadings", "bootstrap_B", "bootstrap_seed",
-        "xgb_tuning", "residualizer_args", "base_seed"
-      ),
-      envir = environment()
-    )
-
-    # run with progress bar in parallel
-    out_list <- pbapply::pblapply(
-      X = seq_len(reps),
       cl = cl,
-      FUN = run_rep
+      varlist = ls(envir = .GlobalEnv),
+      envir = .GlobalEnv
     )
 
-    results_df <- dplyr::bind_rows(out_list)
+    results_list <- pbapply::pblapply(
+      X = seq_len(reps),
+      FUN = run_one,
+      cl = cl
+    )
   }
 
-  # final output list
+  # stack all replication outputs
+  results <- do.call(rbind, results_list)
+
+  # return both the final results and the study objects
   list(
-    results = results_df,
-    objects = list(
+    results = results,
+    study = list(
+      reps = reps,
+      N = N,
+      T = T,
+      k = k,
       Phi = Phi,
       Sigma = Sigma,
       Omega11 = Omega11,
       Delta_list = Delta_list,
-      settings = list(
-        reps = reps,
-        N = N,
-        T = T,
-        k = k,
-        residualizer = residualizer,
-        sem_model = sem_model,
-        confounder_order = confounder_order,
-        exclude = exclude,
-        free_loadings = free_loadings,
-        bootstrap_B = if (uses_bootstrap_se(residualizer)) as.integer(bootstrap_B) else 0L,
-        cores = cores,
-        base_seed = base_seed
-      ),
-      xgb_tuning = xgb_tuning
+      residualizer = residualizer,
+      sem_model = sem_model,
+      confounder_order = confounder_order,
+      exclude = exclude,
+      free_loadings = free_loadings,
+      bootstrap_B = bootstrap_B,
+      bootstrap_seed = bootstrap_seed,
+      cores = cores,
+      base_seed = base_seed,
+      xgb_tuning = xgb_tuning,
+      tune_xgb = tune_xgb,
+      xgb_tune_args = xgb_tune_args,
+      residualizer_args = residualizer_args
     )
   )
 }

@@ -90,21 +90,21 @@ xgb_tuning <- NULL
 
 xgb_tune_args <- list(
   tuning_grid = expand.grid(
-    eta = c(0.05, 0.10),
-    max_depth = c(2, 3),
-    min_child_weight = c(1, 5),
-    subsample = 0.8,
-    colsample_bytree = 0.8
+    eta = c(0.01, 0.03, 0.05, 0.10),
+    max_depth = c(2, 3, 4, 6),
+    min_child_weight = c(1, 3, 5, 7),
+    subsample = c(0.7, 0.8, 1.0),
+    colsample_bytree = c(0.7, 0.8, 1.0)
   ),
-  cv_folds = 3,
-  nrounds_max = 150,
-  early_stopping_rounds = 10,
+  cv_folds = 5,
+  nrounds_max = 600,
+  early_stopping_rounds = 30,
   nthread = 1,
   seed = 123
 )
 
 residualizer_args_xgb <- list(
-  oof_folds = 2,
+  oof_folds = 5,
   nthread = 1,
   seed = 123
 )

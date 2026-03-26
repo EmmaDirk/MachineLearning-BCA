@@ -13,6 +13,40 @@
 # - TBA) Tabular Prior Data-Fitted Network (TabPFN).
 # ------------------------------------------------------------------------------------------
 
+# helper function to create grouped OOF folds
+# if duplicated bootstrap rows share the same original id, they are forced into the same fold
+make_group_folds <- function(id, oof_folds = 2, seed = 123) {
+  
+  # stop if fold count is not valid
+  if (!is.numeric(oof_folds) || length(oof_folds) != 1 || is.na(oof_folds) || oof_folds < 2)
+    stop("'oof_folds' must be a single integer >= 2.")
+  
+  # coerce to integer
+  oof_folds <- as.integer(oof_folds)
+  
+  # stop if id is missing
+  if (is.null(id))
+    stop("'id' must not be NULL.")
+  
+  # coerce to character to avoid factor / numeric indexing issues
+  id_chr <- as.character(id)
+  
+  # get unique ids
+  u <- unique(id_chr)
+  
+  # stop if there are fewer unique ids than folds
+  if (length(u) < oof_folds)
+    stop("Need at least as many unique ids as OOF folds.")
+  
+  # assign folds at the original-id level
+  set.seed(seed)
+  fold_u <- sample(rep(seq_len(oof_folds), length.out = length(u)))
+  names(fold_u) <- u
+  
+  # map the original-id fold assignment back to all rows
+  as.integer(fold_u[id_chr])
+}
+
 # ----------------------------------- 1) linear residualiser -------------------------------
 residualise_panel_linearC <- function(df,
                                       k = NULL,
@@ -20,7 +54,9 @@ residualise_panel_linearC <- function(df,
                                       y_prefix = "y",
                                       c_prefix = "c",
                                       exclude = NULL,
-                                      interaction_order = 1) {
+                                      interaction_order = 1,
+                                      oof_folds = 2,
+                                      seed = 123) {
   
   # convert to data frame
   df <- as.data.frame(df)
@@ -88,14 +124,50 @@ residualise_panel_linearC <- function(df,
     rhs <- paste0("(", paste(c_cols, collapse = " + "), ")^", interaction_order)
   }
   
+  # save sample size
+  n <- nrow(df)
+  
+  # -------- create folds --------
+  
+  # if bootstrap preserved original row ids, keep duplicated copies in the same fold
+  if (".id_orig" %in% names(df)) {
+    
+    # create grouped folds at the original-id level
+    folds <- make_group_folds(df$.id_orig, oof_folds = oof_folds, seed = seed)
+    
+  } else {
+    
+    set.seed(seed)
+    
+    # create folds
+    folds <- sample(rep(1:oof_folds, length.out = n))
+  }
+  
   # function to residualise a single variable against the chosen confounder formula
   residualise_one <- function(varname) {
     
     # create formula varname ~ confounders
     fml <- as.formula(paste(varname, "~", rhs))
     
-    # fit linear model and return residuals
-    resid(lm(fml, data = df))
+    # create empty vector for out-of-fold predictions
+    pred <- numeric(n)
+    
+    # fit out-of-fold linear models
+    for (f in 1:oof_folds) {
+      
+      # grab training and test sets
+      train <- folds != f
+      test  <- folds == f
+      
+      # fit linear model on the training fold only
+      fit <- lm(fml, data = df[train, , drop = FALSE])
+      
+      # predict on the held-out fold
+      pred[test] <- predict(fit, newdata = df[test, , drop = FALSE])
+    }
+    
+    # return OOF residuals
+    df[[varname]] - pred
   }
   
   # for each x, residualise against confounders
@@ -151,40 +223,6 @@ build_xgb_confounder_matrix <- function(df, c_cols, interaction_order = 1) {
   
   # return numeric matrix
   X
-}
-
-# helper function to create grouped OOF folds
-# if duplicated bootstrap rows share the same original id, they are forced into the same fold
-make_group_folds <- function(id, oof_folds = 2, seed = 123) {
-  
-  # stop if fold count is not valid
-  if (!is.numeric(oof_folds) || length(oof_folds) != 1 || is.na(oof_folds) || oof_folds < 2)
-    stop("'oof_folds' must be a single integer >= 2.")
-  
-  # coerce to integer
-  oof_folds <- as.integer(oof_folds)
-  
-  # stop if id is missing
-  if (is.null(id))
-    stop("'id' must not be NULL.")
-  
-  # coerce to character to avoid factor / numeric indexing issues
-  id_chr <- as.character(id)
-  
-  # get unique ids
-  u <- unique(id_chr)
-  
-  # stop if there are fewer unique ids than folds
-  if (length(u) < oof_folds)
-    stop("Need at least as many unique ids as OOF folds.")
-  
-  # assign folds at the original-id level
-  set.seed(seed)
-  fold_u <- sample(rep(seq_len(oof_folds), length.out = length(u)))
-  names(fold_u) <- u
-  
-  # map the original-id fold assignment back to all rows
-  as.integer(fold_u[id_chr])
 }
 
 # ---------------------------- 2.1) tuning function ------------------------------------
