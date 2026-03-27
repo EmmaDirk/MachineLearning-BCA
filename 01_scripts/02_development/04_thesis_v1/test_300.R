@@ -26,8 +26,11 @@ set.seed(1233)
 # number of observed base confounders
 k <- 2
 
-# number of waves
+# number of observed waves
 T_waves <- 5
+
+# number of initial waves to discard before keeping the observed panel
+burn_in <- 20
 
 # covariance of the observed base confounders
 Omega11 <- diag(2)
@@ -71,6 +74,7 @@ out <- simulate_panel_data(
   Omega11 = Omega11,
   Sigma = Sigma,
   Delta_list = Delta_list,
+  burn_in = burn_in,
   eig_tol = 1e-10
 )
 
@@ -109,8 +113,11 @@ residualizer_args_xgb <- list(
   seed = 123
 )
 
-# linear residualizer should not receive the xgb args
-residualizer_args_linear <- list()
+# linear residualizer should use the same OOF setup as XGB
+residualizer_args_linear <- list(
+  oof_folds = 5,
+  seed = 123
+)
 
 # for residualizer = "none"
 residualizer_args_none <- list()
@@ -121,6 +128,7 @@ results_none_clpm_noconf <- run_simulation_study(
   reps = 100,
   N = 300,
   T = T_waves,
+  burn_in = burn_in,
   k = k,
   Phi = Phi,
   Sigma = Sigma,
@@ -157,6 +165,7 @@ results_none_clpm_withconf <- run_simulation_study(
   reps = 100,
   N = 300,
   T = T_waves,
+  burn_in = burn_in,
   k = k,
   Phi = Phi,
   Sigma = Sigma,
@@ -193,6 +202,7 @@ results_linear_clpm <- run_simulation_study(
   reps = 100,
   N = 300,
   T = T_waves,
+  burn_in = burn_in,
   k = k,
   Phi = Phi,
   Sigma = Sigma,
@@ -229,6 +239,7 @@ results_linear_riclpm <- run_simulation_study(
   reps = 100,
   N = 300,
   T = T_waves,
+  burn_in = burn_in,
   k = k,
   Phi = Phi,
   Sigma = Sigma,
@@ -265,6 +276,7 @@ results_linear_dpm <- run_simulation_study(
   reps = 100,
   N = 300,
   T = T_waves,
+  burn_in = burn_in,
   k = k,
   Phi = Phi,
   Sigma = Sigma,
@@ -301,6 +313,7 @@ results_xgb_clpm <- run_simulation_study(
   reps = 100,
   N = 300,
   T = T_waves,
+  burn_in = burn_in,
   k = k,
   Phi = Phi,
   Sigma = Sigma,
@@ -337,6 +350,7 @@ results_xgb_riclpm <- run_simulation_study(
   reps = 100,
   N = 300,
   T = T_waves,
+  burn_in = burn_in,
   k = k,
   Phi = Phi,
   Sigma = Sigma,
@@ -373,6 +387,7 @@ results_xgb_dpm <- run_simulation_study(
   reps = 100,
   N = 300,
   T = T_waves,
+  burn_in = burn_in,
   k = k,
   Phi = Phi,
   Sigma = Sigma,
@@ -409,6 +424,7 @@ results_none_riclpm <- run_simulation_study(
   reps = 100,
   N = 300,
   T = T_waves,
+  burn_in = burn_in,
   k = k,
   Phi = Phi,
   Sigma = Sigma,
@@ -445,6 +461,7 @@ results_none_dpm <- run_simulation_study(
   reps = 100,
   N = 300,
   T = T_waves,
+  burn_in = burn_in,
   k = k,
   Phi = Phi,
   Sigma = Sigma,

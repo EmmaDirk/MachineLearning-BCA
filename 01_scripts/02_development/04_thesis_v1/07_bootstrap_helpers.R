@@ -1,3 +1,4 @@
+# 07_bootstrap_helpers.R
 # These helpers handle the parts of the workflow that are not the main SEM fit itself:
 # - classifying runs as success / non-converged / improper
 # - bootstrap-based standard errors for two-stage procedures
@@ -71,12 +72,22 @@ bootstrap_pipeline_se <- function(
       ARX = rep(NA_real_, T),
       ARY = rep(NA_real_, T),
       CXY = rep(NA_real_, T),
-      CYX = rep(NA_real_, T)
+      CYX = rep(NA_real_, T),
+      bootstrap_prop_success = NA_real_
     ))
   }
 
-  # optional reproducibility
-  if (!is.null(seed)) set.seed(seed)
+  # if no bootstrap seed was supplied, generate one automatically
+  # this keeps the function usable even when seed = NULL
+  if (is.null(seed)) {
+    max_seed <- max(1L, .Machine$integer.max - as.integer(B) - 1L)
+    seed <- as.integer(sample.int(max_seed, size = 1))
+  } else {
+    seed <- as.integer(seed[1])
+  }
+
+  # set the bootstrap seed once
+  set.seed(seed)
 
   # ensure that each original row carries a stable id through the bootstrap
   if (!(".id_orig" %in% names(df))) {
@@ -89,12 +100,26 @@ bootstrap_pipeline_se <- function(
   CXY <- matrix(NA_real_, nrow = B, ncol = T)
   CYX <- matrix(NA_real_, nrow = B, ncol = T)
 
+  # track how many bootstrap refits were fully successful and proper
+  boot_success <- rep(FALSE, B)
+
   # bootstrap the full pipeline
   for (b in seq_len(B)) {
 
     # sample rows with replacement
     idx <- sample.int(n = nrow(df), size = nrow(df), replace = TRUE)
     df_b <- df[idx, , drop = FALSE]
+
+    # vary the stage-1 fold allocation seed across bootstrap draws
+    # if we keep the same fold seed in every draw, the bootstrap misses an
+    # important source of stage-1 uncertainty and the SEs can become too small
+    residualizer_args_b <- residualizer_args
+
+    if (is.null(residualizer_args_b)) {
+      residualizer_args_b <- list()
+    }
+
+    residualizer_args_b$seed <- as.integer(seed + b)
 
     # refit the entire pipeline on the resample
     fit_b <- fit_analysis_pipeline(
@@ -107,11 +132,14 @@ bootstrap_pipeline_se <- function(
       exclude = exclude,
       free_loadings = free_loadings,
       xgb_tuning = xgb_tuning,
-      residualizer_args = residualizer_args
+      residualizer_args = residualizer_args_b
     )
 
     # skip failed bootstrap fits
     if (is.null(fit_b$fit)) next
+
+    # record whether this bootstrap fit was fully successful and proper
+    boot_success[b] <- identical(classify_fit_flag(fit_b$fit), 0L)
 
     # extract lagged estimates from the bootstrap fit
     lag_b <- extract_lagged_estimates(
@@ -131,6 +159,7 @@ bootstrap_pipeline_se <- function(
     ARX = apply(ARX, 2, stats::sd, na.rm = TRUE),
     ARY = apply(ARY, 2, stats::sd, na.rm = TRUE),
     CXY = apply(CXY, 2, stats::sd, na.rm = TRUE),
-    CYX = apply(CYX, 2, stats::sd, na.rm = TRUE)
+    CYX = apply(CYX, 2, stats::sd, na.rm = TRUE),
+    bootstrap_prop_success = mean(boot_success)
   )
 }

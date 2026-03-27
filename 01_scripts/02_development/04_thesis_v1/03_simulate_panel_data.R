@@ -53,11 +53,12 @@
 
 simulate_panel_data <- function(
     N,                                                            # number of individuals
-    T,                                                            # number of waves
+    T,                                                            # number of observed waves to keep
     Phi,                                                          # lag matrix (diagonal elements are autoregressive effects)
     Delta_list,                                                   # list of Delta matrices
     Omega11,                                                      # covariance matrix of base confounders
     Sigma,                                                        # desired covariance matrix of (X_t, Y_t)
+    burn_in = 0L,                                                 # number of initial waves to discard
     seed = NULL,                                                  # seed for reproducibility
     eig_tol = 1e-10                                               # tolerance for positive semidefiniteness
 ){
@@ -69,6 +70,13 @@ simulate_panel_data <- function(
     stop("N must be a positive integer.")
   if (!is.numeric(T) || T < 1 || T != as.integer(T))
     stop("T must be a positive integer.")
+  if (!is.numeric(burn_in) || burn_in < 0 || burn_in != as.integer(burn_in))
+    stop("burn_in must be a non-negative integer.")
+
+  # observed and total number of waves
+  T_obs <- as.integer(T)
+  burn_in <- as.integer(burn_in)
+  T_total <- T_obs + burn_in
 
   # check that Phi and Sigma are 2x2 matrices
   if (!is.matrix(Phi) || !all(dim(Phi) == c(2,2)))
@@ -97,13 +105,37 @@ simulate_panel_data <- function(
     stop("Base confounders must be standardized (diag(Omega11)=1).")
 
   # check that Delta_list is a list
-  if (!is.list(Delta_list) || length(Delta_list) != T)
-    stop("Delta_list must be a list of length T.")
+  if (!is.list(Delta_list))
+    stop("Delta_list must be a list.")
+
+  # Delta_list may be supplied in one of two ways:
+  # 1) length = T_total: a full trajectory including burn-in
+  # 2) length = T_obs:   only the observed trajectory; then we prepend burn-in copies
+  #                      of the first supplied Delta matrix
+  if (!(length(Delta_list) %in% c(T_obs, T_total))) {
+    stop(
+      "Delta_list must have length T or T + burn_in. ",
+      "You supplied length ", length(Delta_list),
+      ", but expected ", T_obs, " or ", T_total, "."
+    )
+  }
 
   # check that Delta matrices have column names
   feature_names <- colnames(Delta_list[[1]])
   if (is.null(feature_names))
     stop("Delta matrices must have column names.")
+
+  # if the user supplied only the observed trajectory, prepend burn-in copies
+  # of the first observed Delta matrix so that the last T waves remain the
+  # originally requested observed window
+  if (length(Delta_list) == T_obs && burn_in > 0L) {
+    burn_list <- rep(list(Delta_list[[1]]), burn_in)
+    names(burn_list) <- paste0("burn", seq_len(burn_in))
+    Delta_list <- c(burn_list, Delta_list)
+  }
+
+  # rename the full Delta list to match the total internal time index
+  names(Delta_list) <- paste0("t", seq_len(T_total))
 
   # k = number of base confounders
   k <- nrow(Omega11)
@@ -500,9 +532,9 @@ simulate_panel_data <- function(
 
   # ------------------------- containers -------------------------
 
-  Psi_list <- vector("list",T)
-  M_list <- vector("list",T)
-  W_list <- vector("list",T)
+  Psi_list <- vector("list", T_total)
+  M_list <- vector("list", T_total)
+  W_list <- vector("list", T_total)
 
   # ------------------------- wave 1 -------------------------
 
@@ -538,7 +570,7 @@ simulate_panel_data <- function(
   # ------------------------- waves 2..T -------------------------
 
   # start with wave 2
-  for (t in 2:T) {
+  for (t in 2:T_total) {
 
     # extract Delta_t
     Delta_t <- Delta_list[[t]]
@@ -584,21 +616,24 @@ simulate_panel_data <- function(
 
   # ------------------------- build output data frame -------------------------
 
-  df <- matrix(NA, N, 2*T + ncol(C_full))
+  # keep only the final T_obs waves after burn-in
+  keep_idx <- seq.int(from = burn_in + 1L, to = T_total)
+
+  df <- matrix(NA, N, 2 * T_obs + ncol(C_full))
 
   colnames(df) <- c(
-    paste0("x",1:T),
-    paste0("y",1:T),
+    paste0("x", 1:T_obs),
+    paste0("y", 1:T_obs),
     feature_names
   )
 
-  for (t in seq_len(T)) {
-
-    df[,paste0("x",t)] <- W_list[[t]][,1]
-    df[,paste0("y",t)] <- W_list[[t]][,2]
+  for (j in seq_along(keep_idx)) {
+    t_keep <- keep_idx[j]
+    df[, paste0("x", j)] <- W_list[[t_keep]][, 1]
+    df[, paste0("y", j)] <- W_list[[t_keep]][, 2]
   }
 
-  df[,(2*T+1):(2*T+ncol(C_full))] <- C_full
+  df[, (2 * T_obs + 1):(2 * T_obs + ncol(C_full))] <- C_full
 
   # ------------------------- return object -------------------------
 
@@ -622,6 +657,14 @@ simulate_panel_data <- function(
 
     Omega_full = Omega_full,
 
-    Delta_list = Delta_list
+    Delta_list = Delta_list,
+
+    burn_in = burn_in,
+
+    T_observed = T_obs,
+
+    T_total = T_total,
+
+    keep_idx = keep_idx
   ))
 }

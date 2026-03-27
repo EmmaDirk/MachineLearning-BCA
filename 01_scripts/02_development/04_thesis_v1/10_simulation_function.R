@@ -181,6 +181,7 @@ run_simulation_study <- function(
     Sigma,
     Omega11,
     Delta_list,
+    burn_in = 0L,
     residualizer = c("none", "linear", "xgb"),
     sem_model = c("clpm", "riclpm", "dpm"),
     confounder_order = 1,
@@ -199,6 +200,13 @@ run_simulation_study <- function(
   # match choices
   residualizer <- match.arg(residualizer)
   sem_model <- match.arg(sem_model)
+
+  # check burn-in
+  if (!is.numeric(burn_in) || length(burn_in) != 1 || is.na(burn_in) ||
+      burn_in < 0 || burn_in != as.integer(burn_in)) {
+    stop("'burn_in' must be a single non-negative integer.")
+  }
+  burn_in <- as.integer(burn_in)
 
   # validate argument combinations before doing any work
   validate_simulation_inputs(
@@ -234,6 +242,7 @@ run_simulation_study <- function(
       Delta_list = Delta_list,
       Omega11 = Omega11,
       Sigma = Sigma,
+      burn_in = burn_in,
       seed = base_seed + 1L
     )
 
@@ -278,6 +287,7 @@ run_simulation_study <- function(
       Sigma = Sigma,
       Omega11 = Omega11,
       Delta_list = Delta_list,
+      burn_in = burn_in,
       residualizer = residualizer,
       sem_model = sem_model,
       confounder_order = confounder_order,
@@ -339,6 +349,7 @@ run_simulation_study <- function(
       Sigma = Sigma,
       Omega11 = Omega11,
       Delta_list = Delta_list,
+      burn_in = burn_in,
       residualizer = residualizer,
       sem_model = sem_model,
       confounder_order = confounder_order,

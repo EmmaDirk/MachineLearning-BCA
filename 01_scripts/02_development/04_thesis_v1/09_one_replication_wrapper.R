@@ -1,3 +1,4 @@
+# 09_one_replication_wrapper.R
 # This wrapper executes one full replication of the simplified simulation study.
 #
 # One replication now means:
@@ -85,6 +86,7 @@ make_failed_replication_frame <- function(
     c_order = rep(compute_effective_c_order(residualizer, sem_model, confounder_order), T),
     free_loadings = rep(if (sem_model %in% c("riclpm", "dpm")) as.integer(free_loadings) else NA_integer_, T),
     bootstrap_B = rep(if (uses_bootstrap_se(residualizer)) as.integer(bootstrap_B) else 0L, T),
+    bootstrap_prop_success = rep(NA_real_, T),
     BIC = rep(NA_real_, T),
     beta_x = true_par$beta_x,
     beta_y = true_par$beta_y,
@@ -111,6 +113,7 @@ run_one_replication <- function(
     Sigma,
     Omega11,
     Delta_list,
+    burn_in = 0L,
     residualizer = c("none", "linear", "xgb"),
     sem_model = c("clpm", "riclpm", "dpm"),
     confounder_order = 1,
@@ -136,6 +139,7 @@ run_one_replication <- function(
       Delta_list = Delta_list,
       Omega11 = Omega11,
       Sigma = Sigma,
+      burn_in = burn_in,
       seed = seed
     ),
     error = function(e) structure(list(message = conditionMessage(e)), class = "sim_error")
@@ -184,6 +188,9 @@ run_one_replication <- function(
     model_type = sem_model
   )
 
+  # default bootstrap success fraction
+  bootstrap_prop_success <- NA_real_
+
   # replace standard errors by bootstrap SEs for two-stage methods if requested
   if (uses_bootstrap_se(residualizer) && bootstrap_B >= 2 && !is.null(fit_out$fit)) {
 
@@ -206,6 +213,7 @@ run_one_replication <- function(
     lag$se_ARY <- se_boot$ARY
     lag$se_CXY <- se_boot$CXY
     lag$se_CYX <- se_boot$CYX
+    bootstrap_prop_success <- se_boot$bootstrap_prop_success
   }
 
   # true lagged parameters implied by Phi
@@ -222,6 +230,7 @@ run_one_replication <- function(
     c_order = rep(compute_effective_c_order(residualizer, sem_model, confounder_order), T),
     free_loadings = rep(if (sem_model %in% c("riclpm", "dpm")) as.integer(free_loadings) else NA_integer_, T),
     bootstrap_B = rep(if (uses_bootstrap_se(residualizer)) as.integer(bootstrap_B) else 0L, T),
+    bootstrap_prop_success = rep(bootstrap_prop_success, T),
     BIC = rep(extract_bic(fit_out$fit), T),
     beta_x = true_par$beta_x,
     beta_y = true_par$beta_y,
