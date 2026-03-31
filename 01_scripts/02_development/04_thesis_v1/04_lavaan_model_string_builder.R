@@ -3,7 +3,7 @@
 # As such we use text manipulation to create the model strings dynamically.
 #
 # The functions build the following models:
-# - 1) CLPM where we can optionally control for confounders directly 
+# - 1) CLPM where we can optionally control for confounders directly
 # - RI-CLPM, optionally freeing loadings
 # - DPM, optionally freeing loadings
 # ------------------------------------------------------------------------------------------------------------
@@ -15,6 +15,14 @@
 # 2 = main effects + all 2-way interactions among the confounders
 # 3 = main effects + all 2-way + all 3-way interactions among the confounders
 # exclude optionally removes specific confounder terms (e.g., "c1", "c1.c2")
+#
+# IMPORTANT:
+# If confounders are included, they now enter:
+# - wave 1 directly: x1 ~ C, y1 ~ C
+# - waves 2..T directly as well: x_t ~ x_{t-1} + y_{t-1} + C, y_t ~ x_{t-1} + y_{t-1} + C
+#
+# This aligns the direct-adjusted CLPM with the burn-in data-generating process,
+# where the first observed wave is already downstream of earlier unobserved waves.
 
 build_clpm <- function(T, k = 0, confounder_order = 0, exclude = NULL) {
 
@@ -27,53 +35,72 @@ build_clpm <- function(T, k = 0, confounder_order = 0, exclude = NULL) {
     setdiff(x, exclude)
   }
 
-  # here we build the regression lines:
-  # X_t = X_{t-1} + Y_{t-1} (+ confounders / confounder interactions depending on confounder_order)
-  # Y_t = X_{t-1} + Y_{t-1} (+ confounders / confounder interactions depending on confounder_order)
+  # build the observed confounder terms once
+  conf_terms <- character(0)
+
+  # add confounder main effects if requested
+  if (confounder_order >= 1 && k > 0) {
+    main_terms <- remove_excluded(C_names)
+    conf_terms <- c(conf_terms, main_terms)
+  }
+
+  # add all 2-way interactions among confounders if requested
+  if (confounder_order >= 2 && k >= 2) {
+    two_way <- apply(combn(C_names, 2), 2, paste, collapse = ".")
+    two_way <- remove_excluded(two_way)
+    conf_terms <- c(conf_terms, two_way)
+  }
+
+  # add all 3-way interactions among confounders if requested
+  if (confounder_order >= 3 && k >= 3) {
+    three_way <- apply(combn(C_names, 3), 2, paste, collapse = ".")
+    three_way <- remove_excluded(three_way)
+    conf_terms <- c(conf_terms, three_way)
+  }
+
+  # baseline equations:
+  # if confounders are included, wave 1 is also regressed on them
+  baseline_block <- character(0)
+
+  if (length(conf_terms) > 0) {
+    conf_rhs <- paste(conf_terms, collapse = " + ")
+    baseline_block <- c(
+      sprintf("x1 ~ %s", conf_rhs),
+      sprintf("y1 ~ %s", conf_rhs)
+    )
+  }
+
+  # lagged regressions for waves 2..T
   regress_block <- paste(
+    c(
+      baseline_block,
+      unlist(lapply(2:T, function(t) {
 
-    # for each time point from 2 to T
-    unlist(lapply(2:T, function(t) {
+        # define lagged predictors
+        lag_x <- sprintf("x%d", t - 1)
+        lag_y <- sprintf("y%d", t - 1)
 
-      # define lagged predictors
-      lag_x <- sprintf("x%d", t - 1)
-      lag_y <- sprintf("y%d", t - 1)
+        # start with baseline predictors
+        rhs_terms <- c(lag_x, lag_y)
 
-      # start with baseline predictors
-      rhs_terms <- c(lag_x, lag_y)
+        # add the same observed confounder terms at every later wave
+        if (length(conf_terms) > 0) {
+          rhs_terms <- c(rhs_terms, conf_terms)
+        }
 
-      # add confounder main effects if requested
-      if (confounder_order >= 1 && k > 0) {
-        main_terms <- remove_excluded(C_names)
-        rhs_terms <- c(rhs_terms, main_terms)
-      }
+        # collapse RHS
+        rhs <- paste(rhs_terms, collapse = " + ")
 
-      # add all 2-way interactions among confounders if requested
-      if (confounder_order >= 2 && k >= 2) {
-        two_way <- apply(combn(C_names, 2), 2, paste, collapse = ".")
-        two_way <- remove_excluded(two_way)
-        rhs_terms <- c(rhs_terms, two_way)
-      }
+        c(
+          # X_t regressed on predictors
+          sprintf("x%d ~ %s", t, rhs),
 
-      # add all 3-way interactions among confounders if requested
-      if (confounder_order >= 3 && k >= 3) {
-        three_way <- apply(combn(C_names, 3), 2, paste, collapse = ".")
-        three_way <- remove_excluded(three_way)
-        rhs_terms <- c(rhs_terms, three_way)
-      }
-
-      # collapse RHS
-      rhs <- paste(rhs_terms, collapse = " + ")
-
-      c(
-        # X_t regressed on predictors
-        sprintf("x%d ~ %s", t, rhs),
-
-        # Y_t regressed on predictors
-        sprintf("y%d ~ %s", t, rhs)
-      )
-
-    })), collapse = "\n"
+          # Y_t regressed on predictors
+          sprintf("y%d ~ %s", t, rhs)
+        )
+      }))
+    ),
+    collapse = "\n"
   )
 
   # residual covariances: X_t ~~ Y_t
@@ -98,14 +125,14 @@ build_clpm <- function(T, k = 0, confounder_order = 0, exclude = NULL) {
 
 # --------------------------------------------- RI-CLPM ---------------------------------------------------------
 build_riclpm <- function(T, free_loadings = FALSE) {
-  
+
   if (T < 2) stop("T must be at least 2.")
-  
+
   # random intercepts
   if (free_loadings) {
     rix_terms <- c("NA*x1", if (T >= 2) paste0("x", 2:T))
     riy_terms <- c("NA*y1", if (T >= 2) paste0("y", 2:T))
-    
+
     ri_block <- paste0(
       "rix =~ ", paste(rix_terms, collapse = " + "), "\n",
       "riy =~ ", paste(riy_terms, collapse = " + "), "\n",
@@ -116,7 +143,7 @@ build_riclpm <- function(T, free_loadings = FALSE) {
   } else {
     rix_terms <- sprintf("1*x%d", 1:T)
     riy_terms <- sprintf("1*y%d", 1:T)
-    
+
     ri_block <- paste0(
       "rix =~ ", paste(rix_terms, collapse = " + "), "\n",
       "riy =~ ", paste(riy_terms, collapse = " + "), "\n",
@@ -125,19 +152,19 @@ build_riclpm <- function(T, free_loadings = FALSE) {
       "rix ~~ riy\n"
     )
   }
-  
+
   # fix observed residual variances to zero
   resid_fix <- paste0(
     paste(sprintf("x%d ~~ 0*x%d", 1:T, 1:T), collapse = "; "), "\n",
     paste(sprintf("y%d ~~ 0*y%d", 1:T, 1:T), collapse = "; "), "\n"
   )
-  
+
   # within-person latent variables
   within_lat <- paste0(
     paste(sprintf("wx%d =~ 1*x%d", 1:T, 1:T), collapse = "; "), "\n",
     paste(sprintf("wy%d =~ 1*y%d", 1:T, 1:T), collapse = "; "), "\n"
   )
-  
+
   # orthogonality constraints
   orth <- paste0(
     "rix ~~ ", paste(sprintf("0*wx%d", 1:T), collapse = " + "), "\n",
@@ -145,18 +172,18 @@ build_riclpm <- function(T, free_loadings = FALSE) {
     "riy ~~ ", paste(sprintf("0*wx%d", 1:T), collapse = " + "), "\n",
     "riy ~~ ", paste(sprintf("0*wy%d", 1:T), collapse = " + "), "\n"
   )
-  
+
   # within-person variances
   within_var <- paste0(
     paste(sprintf("wx%d ~~ wx%d", 1:T, 1:T), collapse = "; "), "\n",
     paste(sprintf("wy%d ~~ wy%d", 1:T, 1:T), collapse = "; "), "\n"
   )
-  
+
   # within-person covariances
   within_cov <- paste0(
     paste(sprintf("wy%d ~~ wx%d", 1:T, 1:T), collapse = "; "), "\n"
   )
-  
+
   # autoregressive and cross-lagged paths
   regress <- paste(
     unlist(lapply(2:T, function(t) {
@@ -167,7 +194,7 @@ build_riclpm <- function(T, free_loadings = FALSE) {
     })),
     collapse = "\n"
   )
-  
+
   # means
   means <- if (free_loadings) {
     paste0(
@@ -180,7 +207,7 @@ build_riclpm <- function(T, free_loadings = FALSE) {
       paste(paste0("y", 1:T), collapse = " + "), " ~ my*1\n"
     )
   }
-  
+
   paste(
     ri_block,
     resid_fix,
@@ -194,17 +221,16 @@ build_riclpm <- function(T, free_loadings = FALSE) {
   )
 }
 
-
 # --------------------------------------------- DPM -------------------------------------------------------------
 build_dpm <- function(T, free_loadings = FALSE) {
-  
+
   if (T < 2) stop("T must be at least 2.")
-  
+
   # accumulating factors
   if (free_loadings) {
     fx_terms <- c("NA*x2", if (T >= 3) paste0("x", 3:T))
     fy_terms <- c("NA*y2", if (T >= 3) paste0("y", 3:T))
-    
+
     latent_block <- paste0(
       "FX =~ ", paste(fx_terms, collapse = " + "), "\n",
       "FY =~ ", paste(fy_terms, collapse = " + "), "\n",
@@ -215,17 +241,17 @@ build_dpm <- function(T, free_loadings = FALSE) {
   } else {
     fx_terms <- sprintf("1*x%d", 2:T)
     fy_terms <- sprintf("1*y%d", 2:T)
-    
+
     latent_block <- paste0(
       "FX =~ ", paste(fx_terms, collapse = " + "), "\n",
       "FY =~ ", paste(fy_terms, collapse = " + "), "\n"
     )
   }
-  
+
   # residual covariances between factors and baseline variables
   fx_cov_block <- "FX ~~ x1 + y1\n"
   fy_cov_block <- "FY ~~ x1 + y1\n"
-  
+
   # autoregressive and cross-lagged paths
   regress_block <- paste(
     sapply(2:T, function(t) {
@@ -233,13 +259,13 @@ build_dpm <- function(T, free_loadings = FALSE) {
     }),
     collapse = "\n"
   )
-  
+
   # residual covariances between x_t and y_t
   resid_cov_block <- paste(
     sprintf("x%d ~~ y%d", 1:T, 1:T),
     collapse = "\n"
   )
-  
+
   # latent variances and covariance for non-free version only
   latent_cov_block <- if (!free_loadings) {
     paste(
@@ -251,20 +277,20 @@ build_dpm <- function(T, free_loadings = FALSE) {
   } else {
     NULL
   }
-  
+
   # residual variances
   resid_var_block <- paste(
     paste(sprintf("x%d ~~ x%d", 1:T, 1:T), collapse = "\n"),
     paste(sprintf("y%d ~~ y%d", 1:T, 1:T), collapse = "\n"),
     sep = "\n"
   )
-  
+
   # means
   means_block <- paste(
     c(sprintf("x%d ~ 1", 1:T), sprintf("y%d ~ 1", 1:T)),
     collapse = "\n"
   )
-  
+
   parts <- c(
     latent_block,
     fx_cov_block,
@@ -275,6 +301,6 @@ build_dpm <- function(T, free_loadings = FALSE) {
     resid_var_block,
     means_block
   )
-  
+
   paste(parts[!sapply(parts, is.null)], collapse = "\n\n")
 }

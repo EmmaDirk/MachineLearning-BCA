@@ -126,7 +126,7 @@ residualizer_args_none <- list()
 
 results_none_clpm_noconf <- run_simulation_study(
   reps = 100,
-  N = 5000,
+  N = 300,
   T = T_waves,
   burn_in = burn_in,
   k = k,
@@ -155,7 +155,7 @@ saveRDS(
   df_none_clpm_noconf,
   file = here(
     "03_output", "02_thesis", "01_tests", "01_data",
-    "01_none_CLPM_no_confounders_constant_2c_linear_5000.rds"
+    "01_none_CLPM_no_confounders_constant_2c_linear_300.rds"
   )
 )
 
@@ -163,7 +163,7 @@ saveRDS(
 
 results_none_clpm_withconf <- run_simulation_study(
   reps = 100,
-  N = 5000,
+  N = 300,
   T = T_waves,
   burn_in = burn_in,
   k = k,
@@ -192,7 +192,7 @@ saveRDS(
   df_none_clpm_withconf,
   file = here(
     "03_output", "02_thesis", "01_tests", "01_data",
-    "02_none_CLPM_with_confounders_constant_2c_linear_5000.rds"
+    "02_none_CLPM_with_confounders_constant_2c_linear_300.rds"
   )
 )
 
@@ -200,7 +200,7 @@ saveRDS(
 
 results_linear_clpm <- run_simulation_study(
   reps = 100,
-  N = 5000,
+  N = 300,
   T = T_waves,
   burn_in = burn_in,
   k = k,
@@ -229,7 +229,7 @@ saveRDS(
   df_linear_clpm,
   file = here(
     "03_output", "02_thesis", "01_tests", "01_data",
-    "03_linearresid_CLPM_constant_2c_linear_5000.rds"
+    "03_linearresid_CLPM_constant_2c_linear_300.rds"
   )
 )
 
@@ -237,7 +237,7 @@ saveRDS(
 
 results_linear_riclpm <- run_simulation_study(
   reps = 100,
-  N = 5000,
+  N = 300,
   T = T_waves,
   burn_in = burn_in,
   k = k,
@@ -266,7 +266,7 @@ saveRDS(
   df_linear_riclpm,
   file = here(
     "03_output", "02_thesis", "01_tests", "01_data",
-    "04_linearresid_RICLPM_constant_2c_linear_5000.rds"
+    "04_linearresid_RICLPM_constant_2c_linear_300.rds"
   )
 )
 
@@ -274,7 +274,7 @@ saveRDS(
 
 results_linear_dpm <- run_simulation_study(
   reps = 100,
-  N = 5000,
+  N = 300,
   T = T_waves,
   burn_in = burn_in,
   k = k,
@@ -303,7 +303,7 @@ saveRDS(
   df_linear_dpm,
   file = here(
     "03_output", "02_thesis", "01_tests", "01_data",
-    "05_linearresid_DPM_constant_2c_linear_5000.rds"
+    "05_linearresid_DPM_constant_2c_linear_300.rds"
   )
 )
 
@@ -311,7 +311,7 @@ saveRDS(
 
 results_xgb_clpm <- run_simulation_study(
   reps = 100,
-  N = 5000,
+  N = 300,
   T = T_waves,
   burn_in = burn_in,
   k = k,
@@ -340,7 +340,7 @@ saveRDS(
   df_xgb_clpm,
   file = here(
     "03_output", "02_thesis", "01_tests", "01_data",
-    "06_xgbresid_CLPM_constant_2c_linear_5000.rds"
+    "06_xgbresid_CLPM_constant_2c_linear_300.rds"
   )
 )
 
@@ -348,7 +348,7 @@ saveRDS(
 
 results_xgb_riclpm <- run_simulation_study(
   reps = 100,
-  N = 5000,
+  N = 300,
   T = T_waves,
   burn_in = burn_in,
   k = k,
@@ -377,7 +377,7 @@ saveRDS(
   df_xgb_riclpm,
   file = here(
     "03_output", "02_thesis", "01_tests", "01_data",
-    "07_xgbresid_RICLPM_constant_2c_linear_5000.rds"
+    "07_xgbresid_RICLPM_constant_2c_linear_300.rds"
   )
 )
 
@@ -385,7 +385,7 @@ saveRDS(
 
 results_xgb_dpm <- run_simulation_study(
   reps = 100,
-  N = 5000,
+  N = 300,
   T = T_waves,
   burn_in = burn_in,
   k = k,
@@ -414,7 +414,7 @@ saveRDS(
   df_xgb_dpm,
   file = here(
     "03_output", "02_thesis", "01_tests", "01_data",
-    "08_xgbresid_DPM_constant_2c_linear_5000.rds"
+    "08_xgbresid_DPM_constant_2c_linear_300.rds"
   )
 )
 
@@ -422,7 +422,7 @@ saveRDS(
 
 results_none_riclpm <- run_simulation_study(
   reps = 100,
-  N = 5000,
+  N = 300,
   T = T_waves,
   burn_in = burn_in,
   k = k,
@@ -451,7 +451,7 @@ saveRDS(
   df_none_riclpm,
   file = here(
     "03_output", "02_thesis", "01_tests", "01_data",
-    "09_none_RICLPM_constant_2c_linear_5000.rds"
+    "09_none_RICLPM_constant_2c_linear_300.rds"
   )
 )
 
@@ -459,7 +459,7 @@ saveRDS(
 
 results_none_dpm <- run_simulation_study(
   reps = 100,
-  N = 5000,
+  N = 300,
   T = T_waves,
   burn_in = burn_in,
   k = k,
@@ -488,7 +488,7 @@ saveRDS(
   df_none_dpm,
   file = here(
     "03_output", "02_thesis", "01_tests", "01_data",
-    "10_none_DPM_constant_2c_linear_5000.rds"
+    "10_none_DPM_constant_2c_linear_300.rds"
   )
 )
 
@@ -510,6 +510,6 @@ saveRDS(
   all_model_dfs,
   file = here(
     "03_output", "02_thesis", "01_tests", "01_data",
-    "00_all_10_model_dataframes_constant_2c_linear_5000.rds"
+    "00_all_10_model_dataframes_constant_2c_linear_300.rds"
   )
 )

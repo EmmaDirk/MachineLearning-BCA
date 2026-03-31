@@ -76,10 +76,24 @@ make_failed_replication_frame <- function(
   # true lagged parameters are still known from Phi
   true_par <- extract_true_lagged_parameters(Phi = Phi, T = T)
 
+  # convert the main-analysis flag into one-hot proportions
+  flag_props <- flag_to_props(flag)
+
   data.frame(
     R = rep(as.integer(R), T),
     T = seq_len(T),
-    flag = rep(as.integer(flag), T),
+
+    # analysis_flag retains the classification of the main fitted model itself
+    analysis_flag = rep(as.integer(flag), T),
+
+    # these three columns always sum to 1
+    flag0 = rep(as.numeric(flag_props$flag0), T),
+    flag1 = rep(as.numeric(flag_props$flag1), T),
+    flag2 = rep(as.numeric(flag_props$flag2), T),
+
+    # diagnostic column for the main fit
+    improper_reason = rep(NA_character_, T),
+
     model = rep(encode_sem_model(sem_model), T),
     residualizer = rep(encode_residualizer(residualizer), T),
     exclusion = rep(collapse_exclusion(exclude), T),
@@ -99,8 +113,12 @@ make_failed_replication_frame <- function(
     CXY = rep(NA_real_, T),
     se_CXY = rep(NA_real_, T),
     CYX = rep(NA_real_, T),
-    se_CYX = rep(NA_real_, T)
-  )
+    se_CYX = rep(NA_real_, T),
+    stringsAsFactors = FALSE
+  ) |>
+    dplyr::mutate(
+      bootstrap_issue_vector = rep(list(NA_character_), T)
+    )
 }
 
 
@@ -179,7 +197,14 @@ run_one_replication <- function(
   )
 
   # classify the fit
-  flag <- classify_fit_flag(fit_out$fit)
+  analysis_flag <- classify_fit_flag(fit_out$fit)
+
+  # diagnose the main improper fit if applicable
+  improper_reason <- if (analysis_flag == 2L) {
+    diagnose_improper_fit(fit_out$fit)
+  } else {
+    NA_character_
+  }
 
   # extract model-based point estimates and standard errors
   lag <- extract_lagged_estimates(
@@ -191,7 +216,14 @@ run_one_replication <- function(
   # default bootstrap success fraction
   bootstrap_prop_success <- NA_real_
 
+  # default bootstrap issue vector
+  bootstrap_issue_vector <- NA_character_
+
+  # default proportional flags are the one-hot encoding of the main fit
+  flag_props <- flag_to_props(analysis_flag)
+
   # replace standard errors by bootstrap SEs for two-stage methods if requested
+  # and replace the one-hot flag columns by bootstrap flag proportions
   if (uses_bootstrap_se(residualizer) && bootstrap_B >= 2 && !is.null(fit_out$fit)) {
 
     se_boot <- bootstrap_pipeline_se(
@@ -213,7 +245,16 @@ run_one_replication <- function(
     lag$se_ARY <- se_boot$ARY
     lag$se_CXY <- se_boot$CXY
     lag$se_CYX <- se_boot$CYX
+
     bootstrap_prop_success <- se_boot$bootstrap_prop_success
+    bootstrap_issue_vector <- se_boot$bootstrap_issue_vector
+
+    # for bootstrap methods, the three flag columns now describe the bootstrap refits
+    flag_props <- list(
+      flag0 = se_boot$flag0,
+      flag1 = se_boot$flag1,
+      flag2 = se_boot$flag2
+    )
   }
 
   # true lagged parameters implied by Phi
@@ -223,7 +264,18 @@ run_one_replication <- function(
   data.frame(
     R = rep(as.integer(R), T),
     T = seq_len(T),
-    flag = rep(as.integer(flag), T),
+
+    # keep the main-analysis flag explicitly
+    analysis_flag = rep(as.integer(analysis_flag), T),
+
+    # these three columns always sum to 1
+    flag0 = rep(as.numeric(flag_props$flag0), T),
+    flag1 = rep(as.numeric(flag_props$flag1), T),
+    flag2 = rep(as.numeric(flag_props$flag2), T),
+
+    # one extra column for the main-fit improper reason
+    improper_reason = rep(improper_reason, T),
+
     model = rep(encode_sem_model(sem_model), T),
     residualizer = rep(encode_residualizer(residualizer), T),
     exclusion = rep(collapse_exclusion(exclude), T),
@@ -243,6 +295,10 @@ run_one_replication <- function(
     CXY = lag$CXY,
     se_CXY = lag$se_CXY,
     CYX = lag$CYX,
-    se_CYX = lag$se_CYX
-  )
+    se_CYX = lag$se_CYX,
+    stringsAsFactors = FALSE
+  ) |>
+    dplyr::mutate(
+      bootstrap_issue_vector = rep(list(bootstrap_issue_vector), T)
+    )
 }
