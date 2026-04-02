@@ -1,7 +1,7 @@
 # 10_one_replication_wrapper.R
-# This wrapper now executes one full replication for either:
-# - one model, for backward compatibility, or
-# - a whole user-supplied set of models, for the efficient shared-data workflow
+# This file executes one full replication for either:
+# - one user-supplied model specification, or
+# - a whole user-supplied set of model specifications
 #
 # One efficient replication means:
 # 1) simulate one data set under one user-supplied Delta trajectory
@@ -276,8 +276,8 @@ run_one_replication_model_set <- function(
     return(do.call(rbind, failed_list))
   }
 
-  # newer simulator may return a list with a data component; older versions may return the data directly
-  df <- if (is.list(sim) && !is.data.frame(sim) && !is.null(sim$data)) sim$data else sim
+  # the simulator returns the analysis data frame directly
+  df <- sim
 
   # prepare each unique stage-1 data set exactly once
   prepared_by_group <- list()
@@ -362,7 +362,7 @@ run_one_replication_model_set <- function(
 }
 
 
-# backward-compatible single-model wrapper
+# convenience wrapper for running one single model through the shared replication engine
 run_one_replication <- function(
     R,
     N,
@@ -423,6 +423,5 @@ run_one_replication <- function(
     seed = seed
   )
 
-  # keep the legacy single-model output shape
-  out[, setdiff(names(out), "model_name"), drop = FALSE]
+  out
 }

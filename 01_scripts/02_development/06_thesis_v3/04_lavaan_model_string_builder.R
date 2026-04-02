@@ -16,7 +16,7 @@
 # 3 = main effects + all 2-way + all 3-way interactions among the confounders
 # exclude optionally removes specific confounder terms (e.g., "c1", "c1.c2")
 #
-# If confounders are included, theyenter:
+# If confounders are included, they enter:
 # - wave 1 directly: x1 ~ C, y1 ~ C
 # - waves 2..T directly as well: x_t ~ x_{t-1} + y_{t-1} + C, y_t ~ x_{t-1} + y_{t-1} + C
 

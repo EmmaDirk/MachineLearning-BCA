@@ -644,15 +644,10 @@ sample_delta_1 <- function(
 
       Omega_full <- build_full_Omega(Omega11, Omega22, Omega33, Omega13)
 
+      # return the sampled Delta matrix together with the full feature covariance matrix
       return(list(
         Delta = D1,
-        Omega = Omega_full,
-        Omega_blocks = list(
-          Omega11 = Omega11,
-          Omega22 = Omega22,
-          Omega33 = Omega33,
-          Omega13 = Omega13
-        )
+        Omega = Omega_full
       ))
     }
   }
