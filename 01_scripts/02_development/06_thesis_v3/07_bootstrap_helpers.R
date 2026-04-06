@@ -223,12 +223,32 @@ make_empty_bootstrap_summary <- function(T) {
     ARY = rep(NA_real_, T),
     CXY = rep(NA_real_, T),
     CYX = rep(NA_real_, T),
+    mean_boot_mse_x = rep(NA_real_, T),
+    sd_boot_mse_x = rep(NA_real_, T),
+    mean_boot_r2_x = rep(NA_real_, T),
+    sd_boot_r2_x = rep(NA_real_, T),
+    mean_boot_mse_y = rep(NA_real_, T),
+    sd_boot_mse_y = rep(NA_real_, T),
+    mean_boot_r2_y = rep(NA_real_, T),
+    sd_boot_r2_y = rep(NA_real_, T),
     bootstrap_prop_success = NA_real_,
     flag0 = NA_real_,
     flag1 = NA_real_,
     flag2 = NA_real_,
     bootstrap_issue_vector = NA_character_
   )
+}
+
+
+# summarize one bootstrap metric matrix column-wise while keeping all-NA columns as NA
+summarise_boot_metric <- function(M, fun = mean) {
+
+  apply(M, 2, function(z) {
+    if (all(is.na(z))) {
+      return(NA_real_)
+    }
+    as.numeric(fun(z, na.rm = TRUE))
+  })
 }
 
 
@@ -284,6 +304,10 @@ bootstrap_model_set <- function(
       ARY = matrix(NA_real_, nrow = B_spec, ncol = T),
       CXY = matrix(NA_real_, nrow = B_spec, ncol = T),
       CYX = matrix(NA_real_, nrow = B_spec, ncol = T),
+      mse_x = matrix(NA_real_, nrow = B_spec, ncol = T),
+      r2_x = matrix(NA_real_, nrow = B_spec, ncol = T),
+      mse_y = matrix(NA_real_, nrow = B_spec, ncol = T),
+      r2_y = matrix(NA_real_, nrow = B_spec, ncol = T),
       boot_flag = rep(NA_integer_, B_spec),
       bootstrap_issue_vector = rep(NA_character_, B_spec)
     )
@@ -337,6 +361,15 @@ bootstrap_model_set <- function(
 
       prep <- prepared_by_group[[as.character(spec$stage1_group_id)]]
 
+      # store the stage-1 ML diagnostics for this bootstrap draw
+      if (!is.null(prep$ml_metrics)) {
+        boot_ml <- standardize_ml_metric_frame(prep$ml_metrics, T = T)
+        store[[spec$name]]$mse_x[b, ] <- boot_ml$mse_x
+        store[[spec$name]]$r2_x[b, ] <- boot_ml$r2_x
+        store[[spec$name]]$mse_y[b, ] <- boot_ml$mse_y
+        store[[spec$name]]$r2_y[b, ] <- boot_ml$r2_y
+      }
+
       if (is.null(prep$data)) {
         fit_b <- list(fit = NULL)
       } else {
@@ -385,10 +418,18 @@ bootstrap_model_set <- function(
     obj <- store[[nm]]
 
     out[[nm]] <- list(
-      ARX = apply(obj$ARX, 2, stats::sd, na.rm = TRUE),
-      ARY = apply(obj$ARY, 2, stats::sd, na.rm = TRUE),
-      CXY = apply(obj$CXY, 2, stats::sd, na.rm = TRUE),
-      CYX = apply(obj$CYX, 2, stats::sd, na.rm = TRUE),
+      ARX = summarise_boot_metric(obj$ARX, fun = stats::sd),
+      ARY = summarise_boot_metric(obj$ARY, fun = stats::sd),
+      CXY = summarise_boot_metric(obj$CXY, fun = stats::sd),
+      CYX = summarise_boot_metric(obj$CYX, fun = stats::sd),
+      mean_boot_mse_x = summarise_boot_metric(obj$mse_x, fun = mean),
+      sd_boot_mse_x = summarise_boot_metric(obj$mse_x, fun = stats::sd),
+      mean_boot_r2_x = summarise_boot_metric(obj$r2_x, fun = mean),
+      sd_boot_r2_x = summarise_boot_metric(obj$r2_x, fun = stats::sd),
+      mean_boot_mse_y = summarise_boot_metric(obj$mse_y, fun = mean),
+      sd_boot_mse_y = summarise_boot_metric(obj$mse_y, fun = stats::sd),
+      mean_boot_r2_y = summarise_boot_metric(obj$r2_y, fun = mean),
+      sd_boot_r2_y = summarise_boot_metric(obj$r2_y, fun = stats::sd),
       bootstrap_prop_success = mean(obj$boot_flag == 0L, na.rm = TRUE),
       flag0 = mean(obj$boot_flag == 0L, na.rm = TRUE),
       flag1 = mean(obj$boot_flag == 1L, na.rm = TRUE),

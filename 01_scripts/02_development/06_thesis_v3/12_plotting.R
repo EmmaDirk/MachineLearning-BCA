@@ -22,7 +22,8 @@ plot_engine_results <- function(results_df,
     "improper_reason", "bootstrap_issue_vector",
     "beta_x", "beta_y", "gamma_xy", "gamma_yx",
     "ARX", "ARY", "CXY", "CYX",
-    "se_ARX", "se_ARY", "se_CXY", "se_CYX"
+    "se_ARX", "se_ARY", "se_CXY", "se_CYX",
+    "mse_x", "r2_x", "mse_y", "r2_y"
   )
 
   missing_cols <- setdiff(required_cols, names(results_df))
@@ -292,153 +293,160 @@ plot_engine_results <- function(results_df,
     )
 
   # ------------------------------------------------------------
-  # flag plots
-  # IMPORTANT:
-  # for one-step methods, flag0/1/2 are one-hot at the replication level
-  # for bootstrap methods, flag0/1/2 are already bootstrap proportions
-  # so taking the mean here gives the correct method-level percentages
+  # flag summaries
   # ------------------------------------------------------------
-  flag_plot_df <- df_all %>%
+  flag0_df <- df_all %>%
     dplyr::group_by(T, method_id, method) %>%
-    dplyr::summarise(
-      flag0 = mean(flag0, na.rm = TRUE),
-      flag1 = mean(flag1, na.rm = TRUE),
-      flag2 = mean(flag2, na.rm = TRUE),
-      .groups = "drop"
-    )
+    dplyr::summarise(prop_flag = mean(flag0, na.rm = TRUE), .groups = "drop")
 
-  flag0_df <- flag_plot_df %>%
-    dplyr::transmute(T, method_id, method, prop_flag = flag0)
-
-  flag1_df <- flag_plot_df %>%
-    dplyr::transmute(T, method_id, method, prop_flag = flag1)
-
-  flag2_df <- flag_plot_df %>%
-    dplyr::transmute(T, method_id, method, prop_flag = flag2)
-
-  # ------------------------------------------------------------
-  # bootstrap success plot
-  # ------------------------------------------------------------
-  bootstrap_df <- df_all %>%
-    dplyr::filter(!is.na(bootstrap_prop_success)) %>%
+  flag1_df <- df_all %>%
     dplyr::group_by(T, method_id, method) %>%
-    dplyr::summarise(
-      mean_bootstrap_prop_success = mean(bootstrap_prop_success, na.rm = TRUE),
-      .groups = "drop"
-    )
+    dplyr::summarise(prop_flag = mean(flag1, na.rm = TRUE), .groups = "drop")
+
+  flag2_df <- df_all %>%
+    dplyr::group_by(T, method_id, method) %>%
+    dplyr::summarise(prop_flag = mean(flag2, na.rm = TRUE), .groups = "drop")
 
   # ------------------------------------------------------------
-  # extra diagnostics: method-level summaries
-  # IMPORTANT:
-  # for bootstrap methods, mean_flag0/1/2 are mean bootstrap proportions
-  # not proportions of main-analysis runs
-  # prop_main_flagged still refers only to the main fit
+  # ML diagnostics
+  # We keep X and Y separate, because the output stores them separately.
   # ------------------------------------------------------------
-  flag_summary_method <- df_all %>%
-    dplyr::group_by(method, method_id) %>%
-    dplyr::summarise(
-      n_total = dplyr::n_distinct(R),
-      mean_flag0 = mean(flag0, na.rm = TRUE),
-      mean_flag1 = mean(flag1, na.rm = TRUE),
-      mean_flag2 = mean(flag2, na.rm = TRUE),
-      prop_main_flagged = mean(analysis_flag != 0, na.rm = TRUE),
-      .groups = "drop"
-    ) %>%
-    dplyr::arrange(dplyr::desc(prop_main_flagged), method)
-
-  # ------------------------------------------------------------
-  # ordering
-  # ------------------------------------------------------------
-  method_key <- df_all %>%
-    dplyr::distinct(
-      model, residualizer, exclusion, c_order,
-      free_loadings, method_id, method
+  ml_long_df <- df %>%
+    tidyr::pivot_longer(
+      cols = c(mse_x, r2_x, mse_y, r2_y),
+      names_to = "ml_name",
+      values_to = "value"
     ) %>%
     dplyr::mutate(
-      family = dplyr::case_when(
-        model == "C" ~ "CLPM",
-        model == "R" ~ "RI-CLPM",
-        model == "D" ~ "DPM",
-        TRUE ~ "Other"
+      metric = dplyr::case_when(
+        ml_name %in% c("mse_x", "mse_y") ~ "MSE",
+        ml_name %in% c("r2_x", "r2_y") ~ "R2",
+        TRUE ~ NA_character_
       ),
-      family_order = dplyr::case_when(
-        family == "CLPM" ~ 1L,
-        family == "RI-CLPM" ~ 2L,
-        family == "DPM" ~ 3L,
-        TRUE ~ 99L
+      target = dplyr::case_when(
+        ml_name %in% c("mse_x", "r2_x") ~ "X",
+        ml_name %in% c("mse_y", "r2_y") ~ "Y",
+        TRUE ~ NA_character_
       )
     ) %>%
-    dplyr::arrange(family_order, method)
+    dplyr::filter(!is.na(metric), !is.na(target), !is.na(value))
 
-  method_levels <- method_key %>%
-    dplyr::pull(method) %>%
-    unique()
+  mse_df <- ml_long_df %>%
+    dplyr::filter(metric == "MSE") %>%
+    dplyr::group_by(T, target, method_id, method) %>%
+    dplyr::summarise(
+      nsim = dplyr::n(),
+      mean_mse = mean(value, na.rm = TRUE),
+      mcse_mean_mse = stats::sd(value, na.rm = TRUE) / sqrt(nsim),
+      .groups = "drop"
+    )
 
-  relbias_df <- relbias_df %>%
-    dplyr::mutate(method = factor(method, levels = method_levels))
+  r2_df <- ml_long_df %>%
+    dplyr::filter(metric == "R2") %>%
+    dplyr::group_by(T, target, method_id, method) %>%
+    dplyr::summarise(
+      nsim = dplyr::n(),
+      mean_r2 = mean(value, na.rm = TRUE),
+      mcse_mean_r2 = stats::sd(value, na.rm = TRUE) / sqrt(nsim),
+      .groups = "drop"
+    )
 
-  rmse_df <- rmse_df %>%
-    dplyr::mutate(method = factor(method, levels = method_levels))
+  # average the X and Y stage-1 MSE within each replication so it can be linked
+  # to one causal-bias quantity per replication and estimand
+  ml_run_avg_df <- df %>%
+    dplyr::transmute(
+      R, T, method_id, method,
+      mse_avg = rowMeans(cbind(mse_x, mse_y), na.rm = TRUE)
+    )
 
-  se_df <- se_df %>%
-    dplyr::mutate(method = factor(method, levels = method_levels))
+  bias_mse_df <- long_est_df %>%
+    dplyr::left_join(
+      ml_run_avg_df,
+      by = c("R", "T", "method_id", "method")
+    ) %>%
+    dplyr::group_by(T, estimand, method_id, method) %>%
+    dplyr::summarise(
+      mean_mse = mean(mse_avg, na.rm = TRUE),
+      rel_bias = {
+        true_val <- dplyr::first(true)
+        mean_est <- mean(estimate, na.rm = TRUE)
+        if (is.na(true_val) || abs(true_val) < 1e-12) {
+          NA_real_
+        } else {
+          (mean_est - true_val) / true_val
+        }
+      },
+      .groups = "drop"
+    )
 
-  se_check <- se_check %>%
-    dplyr::mutate(method = factor(method, levels = method_levels))
-
-  flag0_df <- flag0_df %>%
-    dplyr::mutate(method = factor(method, levels = method_levels))
-
-  flag1_df <- flag1_df %>%
-    dplyr::mutate(method = factor(method, levels = method_levels))
-
-  flag2_df <- flag2_df %>%
-    dplyr::mutate(method = factor(method, levels = method_levels))
-
-  bootstrap_df <- bootstrap_df %>%
-    dplyr::mutate(method = factor(method, levels = method_levels))
+  # keep X and Y separate for the R^2 vs MSE association plot
+  r2_mse_df <- df %>%
+    dplyr::select(R, T, method_id, method, mse_x, r2_x, mse_y, r2_y) %>%
+    tidyr::pivot_longer(
+      cols = c(mse_x, r2_x, mse_y, r2_y),
+      names_to = "ml_name",
+      values_to = "value"
+    ) %>%
+    dplyr::mutate(
+      metric = dplyr::case_when(
+        ml_name %in% c("mse_x", "mse_y") ~ "MSE",
+        ml_name %in% c("r2_x", "r2_y") ~ "R2",
+        TRUE ~ NA_character_
+      ),
+      target = dplyr::case_when(
+        ml_name %in% c("mse_x", "r2_x") ~ "X",
+        ml_name %in% c("mse_y", "r2_y") ~ "Y",
+        TRUE ~ NA_character_
+      )
+    ) %>%
+    dplyr::filter(!is.na(metric), !is.na(target)) %>%
+    tidyr::pivot_wider(
+      names_from = metric,
+      values_from = value
+    ) %>%
+    dplyr::group_by(T, target, method_id, method) %>%
+    dplyr::summarise(
+      mean_mse = mean(MSE, na.rm = TRUE),
+      mean_r2 = mean(R2, na.rm = TRUE),
+      .groups = "drop"
+    )
 
   # ------------------------------------------------------------
-  # palette
+  # method ordering and palette
   # ------------------------------------------------------------
-  make_family_palette <- function(methods, start_col, end_col) {
-    n <- length(methods)
+  method_key <- df_all %>%
+    dplyr::distinct(method_id, method) %>%
+    dplyr::mutate(
+      family = dplyr::case_when(
+        grepl("CLPM", method) ~ "CLPM",
+        grepl("RI-CLPM", method) ~ "RI-CLPM",
+        grepl("DPM", method) ~ "DPM",
+        TRUE ~ "Other"
+      )
+    ) %>%
+    dplyr::arrange(family, method)
 
-    if (n == 0) {
-      return(stats::setNames(character(0), character(0)))
-    }
+  method_levels <- method_key$method
 
-    if (n == 1) {
-      cols <- start_col
-    } else {
-      cols <- grDevices::colorRampPalette(c(start_col, end_col))(n)
-    }
-
-    stats::setNames(cols, methods)
-  }
-
-  clpm_methods <- method_key %>%
-    dplyr::filter(family == "CLPM") %>%
-    dplyr::pull(method)
-
-  riclpm_methods <- method_key %>%
-    dplyr::filter(family == "RI-CLPM") %>%
-    dplyr::pull(method)
-
-  dpm_methods <- method_key %>%
-    dplyr::filter(family == "DPM") %>%
-    dplyr::pull(method)
-
-  pal_method <- c(
-    make_family_palette(clpm_methods, "#39FF14", "#0033FF"),
-    make_family_palette(riclpm_methods, "#FFD600", "#FF1F1F"),
-    make_family_palette(dpm_methods, "#FF1493", "#7A00FF")
+  pal_method <- setNames(
+    scales::hue_pal()(length(method_levels)),
+    method_levels
   )
 
-  pal_method <- pal_method[method_levels]
+  relbias_df$method <- factor(as.character(relbias_df$method), levels = method_levels)
+  rmse_df$method <- factor(as.character(rmse_df$method), levels = method_levels)
+  se_df$method <- factor(as.character(se_df$method), levels = method_levels)
+  se_check$method <- factor(as.character(se_check$method), levels = method_levels)
+  flag0_df$method <- factor(as.character(flag0_df$method), levels = method_levels)
+  flag1_df$method <- factor(as.character(flag1_df$method), levels = method_levels)
+  flag2_df$method <- factor(as.character(flag2_df$method), levels = method_levels)
+  mse_df$method <- factor(as.character(mse_df$method), levels = method_levels)
+  r2_df$method <- factor(as.character(r2_df$method), levels = method_levels)
+  bias_mse_df$method <- factor(as.character(bias_mse_df$method), levels = method_levels)
+  r2_mse_df$method <- factor(as.character(r2_mse_df$method), levels = method_levels)
 
   # ------------------------------------------------------------
-  # plotting helper for the classic performance plots
+  # plotting helper for the main metric plots with MCSE bars
   # ------------------------------------------------------------
   make_metric_plot <- function(data, metric, metric_se, add_zero_line = FALSE) {
 
@@ -492,7 +500,7 @@ plot_engine_results <- function(results_df,
   }
 
   # ------------------------------------------------------------
-  # family-specific plotting helper
+  # plotting helper for family-specific plots
   # ------------------------------------------------------------
   make_family_plot <- function(data, metric, metric_se, family_name,
                                add_zero_line = FALSE) {
@@ -605,6 +613,140 @@ plot_engine_results <- function(results_df,
       p <- p + ggplot2::scale_y_continuous(
         labels = function(x) scales::percent(x, accuracy = 1),
         limits = c(0, 1)
+      )
+    }
+
+    p
+  }
+
+  # ------------------------------------------------------------
+  # plotting helper for ML metric line plots with X/Y facets
+  # ------------------------------------------------------------
+  make_ml_line_plot <- function(data, metric, metric_se, y_label,
+                                ref_line = NULL, percent_y = FALSE) {
+
+    p <- data %>%
+      ggplot2::ggplot(
+        ggplot2::aes(
+          x = T,
+          y = .data[[metric]],
+          color = method,
+          group = method_id
+        )
+      ) +
+      ggplot2::geom_line(linewidth = 0.9) +
+      ggplot2::geom_point(size = 2) +
+      ggplot2::geom_errorbar(
+        ggplot2::aes(
+          ymin = .data[[metric]] - .data[[metric_se]],
+          ymax = .data[[metric]] + .data[[metric_se]]
+        ),
+        width = 0.12,
+        linewidth = 0.4
+      ) +
+      ggplot2::facet_wrap(~ target, nrow = 1, scales = "fixed") +
+      ggplot2::scale_color_manual(values = pal_method, drop = FALSE) +
+      ggplot2::scale_x_continuous(breaks = sort(unique(data$T))) +
+      ggplot2::labs(
+        title = NULL,
+        x = "Occasion",
+        y = y_label,
+        color = NULL
+      ) +
+      ggplot2::theme_classic(base_size = 13) +
+      ggplot2::theme(
+        strip.text = ggplot2::element_text(size = 12),
+        axis.title = ggplot2::element_text(size = 13),
+        axis.text = ggplot2::element_text(size = 12),
+        plot.title = ggplot2::element_blank(),
+        legend.position = "bottom",
+        legend.text = ggplot2::element_text(size = 11)
+      )
+
+    if (!is.null(ref_line)) {
+      p <- p + ggplot2::geom_hline(
+        yintercept = ref_line,
+        linetype = "dashed",
+        linewidth = 0.4
+      )
+    }
+
+    if (percent_y) {
+      p <- p + ggplot2::scale_y_continuous(
+        labels = function(x) scales::percent(x, accuracy = 1),
+        limits = c(0, 1)
+      )
+    }
+
+    p
+  }
+
+  # ------------------------------------------------------------
+  # plotting helper for scatter-type association plots
+  # ------------------------------------------------------------
+  make_scatter_diagnostic_plot <- function(data, x_var, y_var, facet_var,
+                                           x_label, y_label,
+                                           x_ref_line = NULL, y_ref_line = NULL,
+                                           percent_x = FALSE, percent_y = FALSE) {
+
+    p <- data %>%
+      ggplot2::ggplot(
+        ggplot2::aes(
+          x = .data[[x_var]],
+          y = .data[[y_var]],
+          color = method,
+          group = method_id
+        )
+      ) +
+      ggplot2::geom_path(linewidth = 0.7, alpha = 0.8) +
+      ggplot2::geom_point(
+        ggplot2::aes(shape = factor(T)),
+        size = 2.2
+      ) +
+      ggplot2::facet_wrap(stats::as.formula(paste("~", facet_var)), nrow = 1, scales = "free") +
+      ggplot2::scale_color_manual(values = pal_method, drop = FALSE) +
+      ggplot2::labs(
+        title = NULL,
+        x = x_label,
+        y = y_label,
+        color = NULL,
+        shape = "Occasion"
+      ) +
+      ggplot2::theme_classic(base_size = 13) +
+      ggplot2::theme(
+        strip.text = ggplot2::element_text(size = 12),
+        axis.title = ggplot2::element_text(size = 13),
+        axis.text = ggplot2::element_text(size = 12),
+        plot.title = ggplot2::element_blank(),
+        legend.position = "bottom",
+        legend.text = ggplot2::element_text(size = 11)
+      )
+
+    if (!is.null(x_ref_line)) {
+      p <- p + ggplot2::geom_vline(
+        xintercept = x_ref_line,
+        linetype = "dashed",
+        linewidth = 0.4
+      )
+    }
+
+    if (!is.null(y_ref_line)) {
+      p <- p + ggplot2::geom_hline(
+        yintercept = y_ref_line,
+        linetype = "dashed",
+        linewidth = 0.4
+      )
+    }
+
+    if (percent_x) {
+      p <- p + ggplot2::scale_x_continuous(
+        labels = function(x) scales::percent(x, accuracy = 1)
+      )
+    }
+
+    if (percent_y) {
+      p <- p + ggplot2::scale_y_continuous(
+        labels = function(x) scales::percent(x, accuracy = 1)
       )
     }
 
@@ -729,6 +871,53 @@ plot_engine_results <- function(results_df,
   )
 
   # ------------------------------------------------------------
+  # new ML plots
+  # ------------------------------------------------------------
+  plot_mse <- make_ml_line_plot(
+    data = mse_df,
+    metric = "mean_mse",
+    metric_se = "mcse_mean_mse",
+    y_label = "Mean OOF MSE",
+    ref_line = NULL,
+    percent_y = FALSE
+  )
+
+  plot_r2 <- make_ml_line_plot(
+    data = r2_df,
+    metric = "mean_r2",
+    metric_se = "mcse_mean_r2",
+    y_label = "Mean OOF R^2",
+    ref_line = 0,
+    percent_y = FALSE
+  )
+
+  plot_bias_vs_mse <- make_scatter_diagnostic_plot(
+    data = bias_mse_df,
+    x_var = "mean_mse",
+    y_var = "rel_bias",
+    facet_var = "estimand",
+    x_label = "Mean OOF MSE",
+    y_label = "Relative bias",
+    x_ref_line = NULL,
+    y_ref_line = 0,
+    percent_x = FALSE,
+    percent_y = FALSE
+  )
+
+  plot_r2_vs_mse <- make_scatter_diagnostic_plot(
+    data = r2_mse_df,
+    x_var = "mean_mse",
+    y_var = "mean_r2",
+    facet_var = "target",
+    x_label = "Mean OOF MSE",
+    y_label = "Mean OOF R^2",
+    x_ref_line = NULL,
+    y_ref_line = 0,
+    percent_x = FALSE,
+    percent_y = FALSE
+  )
+
+  # ------------------------------------------------------------
   # separate flag plots
   # ------------------------------------------------------------
   plot_flag0 <- ggplot2::ggplot(
@@ -751,7 +940,9 @@ plot_engine_results <- function(results_df,
     ggplot2::theme_classic(base_size = 13) +
     ggplot2::theme(
       legend.position = "bottom",
-      legend.text = ggplot2::element_text(size = 11)
+      legend.text = ggplot2::element_text(size = 11),
+      axis.title = ggplot2::element_text(size = 13),
+      axis.text = ggplot2::element_text(size = 12)
     )
 
   plot_flag1 <- ggplot2::ggplot(
@@ -774,7 +965,9 @@ plot_engine_results <- function(results_df,
     ggplot2::theme_classic(base_size = 13) +
     ggplot2::theme(
       legend.position = "bottom",
-      legend.text = ggplot2::element_text(size = 11)
+      legend.text = ggplot2::element_text(size = 11),
+      axis.title = ggplot2::element_text(size = 13),
+      axis.text = ggplot2::element_text(size = 12)
     )
 
   plot_flag2 <- ggplot2::ggplot(
@@ -797,79 +990,55 @@ plot_engine_results <- function(results_df,
     ggplot2::theme_classic(base_size = 13) +
     ggplot2::theme(
       legend.position = "bottom",
-      legend.text = ggplot2::element_text(size = 11)
+      legend.text = ggplot2::element_text(size = 11),
+      axis.title = ggplot2::element_text(size = 13),
+      axis.text = ggplot2::element_text(size = 12)
     )
 
   # ------------------------------------------------------------
-  # bootstrap success plot
-  # ------------------------------------------------------------
-  plot_bootstrap_prop_success <- ggplot2::ggplot(
-    bootstrap_df,
-    ggplot2::aes(
-      x = T,
-      y = mean_bootstrap_prop_success,
-      color = method,
-      group = method_id
-    )
-  ) +
-    ggplot2::geom_line(linewidth = 0.9) +
-    ggplot2::geom_point(size = 2) +
-    ggplot2::scale_color_manual(values = pal_method, drop = FALSE) +
-    ggplot2::scale_x_continuous(breaks = sort(unique(bootstrap_df$T))) +
-    ggplot2::scale_y_continuous(
-      labels = function(x) scales::percent(x, accuracy = 1),
-      limits = c(0, 1)
-    ) +
-    ggplot2::labs(
-      x = "Occasion",
-      y = "Bootstrap proportion success",
-      color = NULL
-    ) +
-    ggplot2::theme_classic(base_size = 13) +
-    ggplot2::theme(
-      legend.position = "bottom",
-      legend.text = ggplot2::element_text(size = 11)
-    )
-
-  # ------------------------------------------------------------
-  # return
+  # return everything for downstream use
   # ------------------------------------------------------------
   list(
-    plot_relbias = plot_relbias,
-    plot_rmse = plot_rmse,
-    plot_se = plot_se,
-
-    plot_relbias_clpm = plot_relbias_clpm,
-    plot_relbias_riclpm = plot_relbias_riclpm,
-    plot_relbias_dpm = plot_relbias_dpm,
-
-    plot_rmse_clpm = plot_rmse_clpm,
-    plot_rmse_riclpm = plot_rmse_riclpm,
-    plot_rmse_dpm = plot_rmse_dpm,
-
-    plot_se_clpm = plot_se_clpm,
-    plot_se_riclpm = plot_se_riclpm,
-    plot_se_dpm = plot_se_dpm,
-
-    plot_se_ratio = plot_se_ratio,
-    plot_se_diff = plot_se_diff,
-
-    plot_flag0 = plot_flag0,
-    plot_flag1 = plot_flag1,
-    plot_flag2 = plot_flag2,
-
-    plot_bootstrap_prop_success = plot_bootstrap_prop_success,
-
+    # summarised data
     relbias_df = relbias_df,
     rmse_df = rmse_df,
     se_df = se_df,
     se_check = se_check,
-
-    flag_summary_method = flag_summary_method,
-
     flag0_df = flag0_df,
     flag1_df = flag1_df,
     flag2_df = flag2_df,
-    bootstrap_df = bootstrap_df
+    mse_df = mse_df,
+    r2_df = r2_df,
+    bias_mse_df = bias_mse_df,
+    r2_mse_df = r2_mse_df,
+
+    # classic plots
+    plot_relbias = plot_relbias,
+    plot_rmse = plot_rmse,
+    plot_se = plot_se,
+    plot_relbias_clpm = plot_relbias_clpm,
+    plot_relbias_riclpm = plot_relbias_riclpm,
+    plot_relbias_dpm = plot_relbias_dpm,
+    plot_rmse_clpm = plot_rmse_clpm,
+    plot_rmse_riclpm = plot_rmse_riclpm,
+    plot_rmse_dpm = plot_rmse_dpm,
+    plot_se_clpm = plot_se_clpm,
+    plot_se_riclpm = plot_se_riclpm,
+    plot_se_dpm = plot_se_dpm,
+
+    # SE diagnostic plots
+    plot_se_ratio = plot_se_ratio,
+    plot_se_diff = plot_se_diff,
+
+    # new ML plots
+    plot_mse = plot_mse,
+    plot_r2 = plot_r2,
+    plot_bias_vs_mse = plot_bias_vs_mse,
+    plot_r2_vs_mse = plot_r2_vs_mse,
+
+    # flag plots
+    plot_flag0 = plot_flag0,
+    plot_flag1 = plot_flag1,
+    plot_flag2 = plot_flag2
   )
 }

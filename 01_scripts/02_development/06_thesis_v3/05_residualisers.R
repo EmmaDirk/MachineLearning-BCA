@@ -47,6 +47,38 @@ make_group_folds <- function(id, oof_folds = 2, seed = 123) {
   as.integer(fold_u[id_chr])
 }
 
+# helper to compute prediction quality from out-of-fold predictions
+# We store both the MSE and the R^2 because they answer slightly different questions:
+# - MSE is the average squared prediction error
+# - R^2 is the fraction of variance in the target explained by the OOF predictions
+compute_oof_metrics <- function(y, pred) {
+
+  # basic prediction error
+  mse <- mean((y - pred)^2, na.rm = TRUE)
+
+  # use the sample variance of the observed target
+  vy <- stats::var(y, na.rm = TRUE)
+
+  # if the target has zero or undefined variance, R^2 is not defined
+  if (is.na(vy) || !is.finite(vy) || vy <= 0) {
+    r2 <- NA_real_
+  } else {
+    r2 <- 1 - mse / vy
+  }
+
+  list(
+    mse = as.numeric(mse),
+    r2 = as.numeric(r2)
+  )
+}
+
+
+# helper to extract the wave number from names like x1, x2, y3, ...
+extract_wave_number <- function(varname) {
+
+  as.integer(sub("^[^0-9]+", "", varname))
+}
+
 # ----------------------------------- 1) linear residualiser -------------------------------
 residualise_panel_linearC <- function(df,
                                       k = NULL,
@@ -127,6 +159,21 @@ residualise_panel_linearC <- function(df,
   # save sample size
   n <- nrow(df)
 
+  # prepare one T-row metric frame that stores the OOF prediction diagnostics
+  # separately for X and Y at each observed wave
+  wave_x <- extract_wave_number(x_cols)
+  wave_y <- extract_wave_number(y_cols)
+  T_panel <- max(c(wave_x, wave_y), na.rm = TRUE)
+
+  ml_metrics <- data.frame(
+    T = seq_len(T_panel),
+    mse_x = rep(NA_real_, T_panel),
+    r2_x = rep(NA_real_, T_panel),
+    mse_y = rep(NA_real_, T_panel),
+    r2_y = rep(NA_real_, T_panel),
+    stringsAsFactors = FALSE
+  )
+
   # -------- create folds --------
 
   # if bootstrap preserved original row ids, keep duplicated copies in the same fold
@@ -166,23 +213,50 @@ residualise_panel_linearC <- function(df,
       pred[test] <- predict(fit, newdata = df[test, , drop = FALSE])
     }
 
-    # return OOF residuals
-    df[[varname]] - pred
+    # compute prediction diagnostics on the OOF predictions
+    metrics <- compute_oof_metrics(df[[varname]], pred)
+
+    list(
+      residual = df[[varname]] - pred,
+      mse = metrics$mse,
+      r2 = metrics$r2
+    )
   }
 
   # IMPORTANT:
   # residualise every observed wave, including wave 1
   for (x in x_cols) {
-    df[[x]] <- residualise_one(x)
+
+    out_x <- residualise_one(x)
+
+    # replace the x column with its residuals
+    df[[x]] <- out_x$residual
+
+    # store the OOF metrics at the matching wave
+    wave <- extract_wave_number(x)
+    ml_metrics$mse_x[ml_metrics$T == wave] <- out_x$mse
+    ml_metrics$r2_x[ml_metrics$T == wave] <- out_x$r2
   }
 
   # same for y
   for (y in y_cols) {
-    df[[y]] <- residualise_one(y)
+
+    out_y <- residualise_one(y)
+
+    # replace the y column with its residuals
+    df[[y]] <- out_y$residual
+
+    # store the OOF metrics at the matching wave
+    wave <- extract_wave_number(y)
+    ml_metrics$mse_y[ml_metrics$T == wave] <- out_y$mse
+    ml_metrics$r2_y[ml_metrics$T == wave] <- out_y$r2
   }
 
-  # return the residualised data frame
-  df
+  # return the residualised data frame together with the OOF metrics
+  list(
+    data = df,
+    ml_metrics = ml_metrics
+  )
 }
 
 # ----------------------------------- 2) xgb residualiser -------------------------------
@@ -563,6 +637,21 @@ residualise_panel_xgb <- function(
   # save sample size
   n <- nrow(X)
 
+  # prepare one T-row metric frame that stores the OOF prediction diagnostics
+  # separately for X and Y at each observed wave
+  wave_x <- extract_wave_number(x_cols)
+  wave_y <- extract_wave_number(y_cols)
+  T_panel <- max(c(wave_x, wave_y), na.rm = TRUE)
+
+  ml_metrics <- data.frame(
+    T = seq_len(T_panel),
+    mse_x = rep(NA_real_, T_panel),
+    r2_x = rep(NA_real_, T_panel),
+    mse_y = rep(NA_real_, T_panel),
+    r2_y = rep(NA_real_, T_panel),
+    stringsAsFactors = FALSE
+  )
+
   # -------- create folds --------
 
   # if bootstrap preserved original row ids, keep duplicated copies in the same fold
@@ -622,12 +711,14 @@ residualise_panel_xgb <- function(
 
       if (!is.null(tuning$final$x_all)) return(tuning$final$x_all)
       if (!is.null(tuning$final$x_wave2plus)) return(tuning$final$x_wave2plus)
+      if (!is.null(tuning$tune_x)) return(tuning$tune_x)
       stop("No valid X tuning specification found.")
 
     } else {
 
       if (!is.null(tuning$final$y_all)) return(tuning$final$y_all)
       if (!is.null(tuning$final$y_wave2plus)) return(tuning$final$y_wave2plus)
+      if (!is.null(tuning$tune_y)) return(tuning$tune_y)
       stop("No valid Y tuning specification found.")
     }
   }
@@ -641,8 +732,16 @@ residualise_panel_xgb <- function(
     # get out-of-fold predictions from confounders
     pred <- oof_predict(df[[x]], spec$params, spec$nrounds)
 
+    # compute prediction diagnostics on the OOF predictions
+    metrics <- compute_oof_metrics(df[[x]], pred)
+
     # replace the x column with its residuals
     df[[x]] <- df[[x]] - pred
+
+    # store the OOF metrics at the matching wave
+    wave <- extract_wave_number(x)
+    ml_metrics$mse_x[ml_metrics$T == wave] <- metrics$mse
+    ml_metrics$r2_x[ml_metrics$T == wave] <- metrics$r2
   }
 
   # residualise Y
@@ -654,10 +753,21 @@ residualise_panel_xgb <- function(
     # get out-of-fold predictions from confounders
     pred <- oof_predict(df[[y]], spec$params, spec$nrounds)
 
+    # compute prediction diagnostics on the OOF predictions
+    metrics <- compute_oof_metrics(df[[y]], pred)
+
     # replace the y column with its residuals
     df[[y]] <- df[[y]] - pred
+
+    # store the OOF metrics at the matching wave
+    wave <- extract_wave_number(y)
+    ml_metrics$mse_y[ml_metrics$T == wave] <- metrics$mse
+    ml_metrics$r2_y[ml_metrics$T == wave] <- metrics$r2
   }
 
-  # return the residualised data frame
-  df
+  # return the residualised data frame together with the OOF metrics
+  list(
+    data = df,
+    ml_metrics = ml_metrics
+  )
 }

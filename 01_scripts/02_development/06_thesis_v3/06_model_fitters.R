@@ -68,6 +68,81 @@ safe_fit_lavaan <- function(model_string, data) {
   list(fit = fit, err = err)
 }
 
+# infer the number of observed waves from the prepared panel data
+infer_panel_T <- function(df, x_prefix = "x", y_prefix = "y") {
+
+  # work on a data frame copy
+  df <- as.data.frame(df)
+
+  # find all observed X and Y columns
+  x_cols <- grep(paste0("^", x_prefix, "\\d+$"), names(df), value = TRUE)
+  y_cols <- grep(paste0("^", y_prefix, "\\d+$"), names(df), value = TRUE)
+
+  # extract their wave numbers
+  waves <- suppressWarnings(as.integer(sub("^[^0-9]+", "", c(x_cols, y_cols))))
+
+  # if no waves were found, return 0
+  if (length(waves) == 0 || all(is.na(waves))) {
+    return(0L)
+  }
+
+  as.integer(max(waves, na.rm = TRUE))
+}
+
+
+# build one empty T-row ML metric frame
+make_empty_ml_metric_frame <- function(T) {
+
+  data.frame(
+    T = seq_len(T),
+    mse_x = rep(NA_real_, T),
+    r2_x = rep(NA_real_, T),
+    mse_y = rep(NA_real_, T),
+    r2_y = rep(NA_real_, T),
+    stringsAsFactors = FALSE
+  )
+}
+
+
+# standardize one ML metric frame to the requested set of T occasions
+standardize_ml_metric_frame <- function(ml_metrics, T) {
+
+  # start from the empty template
+  out <- make_empty_ml_metric_frame(T)
+
+  # if no metrics were supplied, return the template
+  if (is.null(ml_metrics) || !is.data.frame(ml_metrics) || nrow(ml_metrics) == 0) {
+    return(out)
+  }
+
+  # require a time index
+  if (!("T" %in% names(ml_metrics))) {
+    return(out)
+  }
+
+  # keep only the supported columns
+  keep <- intersect(names(ml_metrics), names(out))
+  tmp <- ml_metrics[, keep, drop = FALSE]
+
+  # merge onto the complete T grid
+  out <- merge(
+    out["T"],
+    tmp,
+    by = "T",
+    all.x = TRUE,
+    sort = TRUE
+  )
+
+  # ensure that all expected columns exist and are ordered correctly
+  for (nm in setdiff(names(make_empty_ml_metric_frame(T)), names(out))) {
+    out[[nm]] <- NA_real_
+  }
+
+  out <- out[, names(make_empty_ml_metric_frame(T)), drop = FALSE]
+  rownames(out) <- NULL
+  out
+}
+
 
 # validate the residualiser-specific argument set before calling stage 1
 validate_residualizer_call <- function(
@@ -185,9 +260,19 @@ apply_residualizer <- function(
     xgb_tuning = xgb_tuning
   )
 
-  # no residualisation: return the data unchanged
+  # allow custom prefixes when we need to build an empty metric frame
+  x_prefix <- if (!is.null(residualizer_args$x_prefix)) residualizer_args$x_prefix else "x"
+  y_prefix <- if (!is.null(residualizer_args$y_prefix)) residualizer_args$y_prefix else "y"
+
+  # infer the number of observed waves once
+  T_panel <- infer_panel_T(df, x_prefix = x_prefix, y_prefix = y_prefix)
+
+  # no residualisation: return the data unchanged together with empty ML metrics
   if (residualizer == "none") {
-    return(df)
+    return(list(
+      data = df,
+      ml_metrics = make_empty_ml_metric_frame(T_panel)
+    ))
   }
 
   # linear residualisation
@@ -279,11 +364,18 @@ prepare_analysis_data <- function(
   # match choices
   residualizer <- match.arg(residualizer)
 
+  # allow custom prefixes when we need to build an empty metric frame
+  x_prefix <- if (!is.null(residualizer_args$x_prefix)) residualizer_args$x_prefix else "x"
+  y_prefix <- if (!is.null(residualizer_args$y_prefix)) residualizer_args$y_prefix else "y"
+
   # harmonize data names once up front for any later direct-adjustment CLPM
   df_work <- rename_feature_columns_for_lavaan(df)
 
+  # infer the number of observed waves once
+  T_panel <- infer_panel_T(df_work, x_prefix = x_prefix, y_prefix = y_prefix)
+
   # apply stage 1 safely
-  df_stage2 <- tryCatch(
+  stage1_out <- tryCatch(
     apply_residualizer(
       df = df_work,
       residualizer = residualizer,
@@ -297,16 +389,18 @@ prepare_analysis_data <- function(
   )
 
   # if residualisation failed, return a structured failure result
-  if (inherits(df_stage2, "stage1_error")) {
+  if (inherits(stage1_out, "stage1_error")) {
     return(list(
       data = NULL,
-      err = df_stage2$message
+      err = stage1_out$message,
+      ml_metrics = make_empty_ml_metric_frame(T_panel)
     ))
   }
 
   list(
-    data = df_stage2,
-    err = NA_character_
+    data = stage1_out$data,
+    err = NA_character_,
+    ml_metrics = standardize_ml_metric_frame(stage1_out$ml_metrics, T = T_panel)
   )
 }
 
@@ -396,12 +490,13 @@ fit_analysis_pipeline <- function(
       fit = NULL,
       err = prep$err,
       data_used = NULL,
-      model_string = NULL
+      model_string = NULL,
+      ml_metrics = prep$ml_metrics
     ))
   }
 
   # fit the SEM on the prepared data
-  fit_sem_on_prepared_data(
+  out <- fit_sem_on_prepared_data(
     df_prepared = prep$data,
     T = T,
     k = k,
@@ -411,4 +506,8 @@ fit_analysis_pipeline <- function(
     exclude = exclude,
     free_loadings = free_loadings
   )
+
+  # pass the stage-1 ML metrics through for optional downstream inspection
+  out$ml_metrics <- prep$ml_metrics
+  out
 }

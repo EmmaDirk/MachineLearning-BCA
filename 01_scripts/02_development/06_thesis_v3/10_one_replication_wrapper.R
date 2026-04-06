@@ -62,6 +62,24 @@ compute_effective_c_order <- function(residualizer, sem_model, confounder_order)
 }
 
 
+# build one empty bootstrap ML summary for the final output frame
+make_empty_boot_ml_summary <- function(T) {
+
+  data.frame(
+    T = seq_len(T),
+    mean_boot_mse_x = rep(NA_real_, T),
+    sd_boot_mse_x = rep(NA_real_, T),
+    mean_boot_r2_x = rep(NA_real_, T),
+    sd_boot_r2_x = rep(NA_real_, T),
+    mean_boot_mse_y = rep(NA_real_, T),
+    sd_boot_mse_y = rep(NA_real_, T),
+    mean_boot_r2_y = rep(NA_real_, T),
+    sd_boot_r2_y = rep(NA_real_, T),
+    stringsAsFactors = FALSE
+  )
+}
+
+
 # build an empty T-row result frame for a failed model within a replication
 make_failed_replication_frame <- function(
     R,
@@ -111,6 +129,18 @@ make_failed_replication_frame <- function(
     beta_y = true_par$beta_y,
     gamma_xy = true_par$gamma_xy,
     gamma_yx = true_par$gamma_yx,
+    mse_x = rep(NA_real_, T),
+    r2_x = rep(NA_real_, T),
+    mse_y = rep(NA_real_, T),
+    r2_y = rep(NA_real_, T),
+    mean_boot_mse_x = rep(NA_real_, T),
+    sd_boot_mse_x = rep(NA_real_, T),
+    mean_boot_r2_x = rep(NA_real_, T),
+    sd_boot_r2_x = rep(NA_real_, T),
+    mean_boot_mse_y = rep(NA_real_, T),
+    sd_boot_mse_y = rep(NA_real_, T),
+    mean_boot_r2_y = rep(NA_real_, T),
+    sd_boot_r2_y = rep(NA_real_, T),
     ARX = rep(NA_real_, T),
     se_ARX = rep(NA_real_, T),
     ARY = rep(NA_real_, T),
@@ -133,6 +163,7 @@ build_model_result_frame <- function(
     spec,
     Phi,
     fit_out,
+    main_ml_metrics = NULL,
     bootstrap_out = NULL
 ) {
 
@@ -153,9 +184,15 @@ build_model_result_frame <- function(
     model_type = spec$sem_model
   )
 
+  # standardize the main-run ML metrics to the final T-row output
+  ml_main <- standardize_ml_metric_frame(main_ml_metrics, T = T)
+
   # default bootstrap outputs
   bootstrap_prop_success <- NA_real_
   bootstrap_issue_vector <- NA_character_
+
+  # default bootstrap ML summaries are missing
+  ml_boot <- make_empty_boot_ml_summary(T)
 
   # default proportional flags are the one-hot encoding of the main fit
   flag_props <- flag_to_props(analysis_flag)
@@ -175,6 +212,19 @@ build_model_result_frame <- function(
       flag0 = bootstrap_out$flag0,
       flag1 = bootstrap_out$flag1,
       flag2 = bootstrap_out$flag2
+    )
+
+    ml_boot <- data.frame(
+      T = seq_len(T),
+      mean_boot_mse_x = bootstrap_out$mean_boot_mse_x,
+      sd_boot_mse_x = bootstrap_out$sd_boot_mse_x,
+      mean_boot_r2_x = bootstrap_out$mean_boot_r2_x,
+      sd_boot_r2_x = bootstrap_out$sd_boot_r2_x,
+      mean_boot_mse_y = bootstrap_out$mean_boot_mse_y,
+      sd_boot_mse_y = bootstrap_out$sd_boot_mse_y,
+      mean_boot_r2_y = bootstrap_out$mean_boot_r2_y,
+      sd_boot_r2_y = bootstrap_out$sd_boot_r2_y,
+      stringsAsFactors = FALSE
     )
   }
 
@@ -209,6 +259,18 @@ build_model_result_frame <- function(
     beta_y = true_par$beta_y,
     gamma_xy = true_par$gamma_xy,
     gamma_yx = true_par$gamma_yx,
+    mse_x = ml_main$mse_x,
+    r2_x = ml_main$r2_x,
+    mse_y = ml_main$mse_y,
+    r2_y = ml_main$r2_y,
+    mean_boot_mse_x = ml_boot$mean_boot_mse_x,
+    sd_boot_mse_x = ml_boot$sd_boot_mse_x,
+    mean_boot_r2_x = ml_boot$mean_boot_r2_x,
+    sd_boot_r2_x = ml_boot$sd_boot_r2_x,
+    mean_boot_mse_y = ml_boot$mean_boot_mse_y,
+    sd_boot_mse_y = ml_boot$sd_boot_mse_y,
+    mean_boot_r2_y = ml_boot$mean_boot_r2_y,
+    sd_boot_r2_y = ml_boot$sd_boot_r2_y,
     ARX = lag$ARX,
     se_ARX = lag$se_ARX,
     ARY = lag$ARY,
@@ -309,7 +371,8 @@ run_one_replication_model_set <- function(
         fit = NULL,
         err = prep$err,
         data_used = NULL,
-        model_string = NULL
+        model_string = NULL,
+        ml_metrics = prep$ml_metrics
       )
     } else {
       fit_results[[spec$name]] <- fit_sem_on_prepared_data(
@@ -322,6 +385,9 @@ run_one_replication_model_set <- function(
         exclude = spec$exclude,
         free_loadings = spec$free_loadings
       )
+
+      # attach the stage-1 ML metrics used by this fitted pipeline
+      fit_results[[spec$name]]$ml_metrics <- prep$ml_metrics
     }
   }
 
@@ -354,6 +420,7 @@ run_one_replication_model_set <- function(
       spec = spec,
       Phi = Phi,
       fit_out = fit_results[[spec$name]],
+      main_ml_metrics = fit_results[[spec$name]]$ml_metrics,
       bootstrap_out = bootstrap_out[[spec$name]]
     )
   })
