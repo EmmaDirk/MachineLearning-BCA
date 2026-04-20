@@ -1,84 +1,198 @@
-# --------------------------------------------------------------------------------
-# Build publication-style plots and summary tables from row-bound simulation output
-#
-# Returned objects in this version:
-#   - summary data frames:
-#       relbias_df, rmse_df, se_df, detect_df, se_check,
-#       flag0_df, flag1_df, flag2_df, mse_df, r2_df
-#   - plots:
-#       plot_relbias, plot_rmse, plot_se, plot_power,
-#       plot_relbias_clpm, plot_relbias_riclpm, plot_relbias_dpm,
-#       plot_rmse_clpm, plot_rmse_riclpm, plot_rmse_dpm,
-#       plot_se_clpm, plot_se_riclpm, plot_se_dpm,
-#       plot_power_clpm, plot_power_riclpm, plot_power_dpm,
-#       plot_se_ratio_clpm, plot_se_ratio_riclpm, plot_se_ratio_dpm,
-#       plot_se_diff_clpm, plot_se_diff_riclpm, plot_se_diff_dpm,
-#       plot_mse, plot_r2
-#
-# Main changes relative to the prior version:
-#   1. Flag plots are removed from the returned object.
-#   2. Flag summary data frames are still returned unchanged.
-#   3. SE diagnostic plots are now family-specific instead of combined.
-# --------------------------------------------------------------------------------
+plot_overview_suite <- function(
+    results_df,
+    drop_flagged = TRUE,
+    occasions = NULL,
+    alpha = 0.05,
+    improper_top_n = 5,
+    print_messages = TRUE
+) {
+  # ============================================================================
+  # PURPOSE
+  # ============================================================================
+  # This function builds a fast overview-plot suite for one simulation-results
+  # data frame.
+  #
+  # It is intended for repeated use across many result files, so the structure is:
+  #
+  #   1. validate and lightly standardise the input once,
+  #   2. build a few reusable long-format tables once,
+  #   3. compute all summary tables from those cached tables,
+  #   4. create the overview plots from the summaries.
+  #
+  # The goal is speed and readability. Expensive wrangling is done once and then
+  # reused, rather than repeating reshaping work for each plot.
+  #
+  # ============================================================================
+  # MAIN OUTPUTS
+  # ============================================================================
+  # Returned data frames:
+  #   - relbias_df
+  #   - rmse_df
+  #   - se_df
+  #   - detect_df
+  #   - se_check
+  #   - mse_df
+  #   - r2_df
+  #   - theory_df
+  #   - true_delta_df
+  #   - flag0_df
+  #   - flag1_df
+  #   - flag2_df
+  #   - improper_reason_df
+  #
+  # Returned plots:
+  #   - family-specific relative-bias plots
+  #   - family-specific RMSE plots
+  #   - family-specific mean-SE plots
+  #   - family-specific power plots
+  #   - family-specific SE-calibration plots (ratio and difference)
+  #   - MSE plots for X and Y with theoretical lower bound
+  #   - R² plots for X and Y with true-R² reference line
+  #   - true-delta plot
+  #   - horizontal bar plots for flag0 / flag1 / flag2
+  #   - faceted improper-reason plot
+  #
+  # ============================================================================
+  # ARGUMENTS
+  # ============================================================================
+  # results_df:
+  #   Simulation-results data frame.
+  #
+  # drop_flagged:
+  #   If TRUE, rows with analysis_flag != 0 are excluded from the main parameter
+  #   and ML summaries. Flag summaries themselves always use the full run-level
+  #   data because that is the whole point of those plots.
+  #
+  # occasions:
+  #   Optional numeric vector of T values to keep. If NULL, all observed T values
+  #   are kept. In many cases you may want 2:5 because T = 1 often has NA values
+  #   for lagged-effect estimates.
+  #
+  # alpha:
+  #   Significance level used for the detection / power summaries.
+  #
+  # improper_top_n:
+  #   Number of improper-solution reasons to keep per method in the improper-
+  #   reason plot.
+  #
+  # print_messages:
+  #   If TRUE, print a few light diagnostic messages and warnings.
+  #
+  # ============================================================================
+  # 1. BASIC INPUT CHECKS
+  # ============================================================================
 
-plot_engine_results <- function(results_df,
-                                drop_flagged = TRUE,
-                                occasions = 2:5,
-                                alpha = 0.05) {
-
-  # ==============================================================================
-  # 1. Basic input checks
-  # ==============================================================================
+  stopifnot(is.data.frame(results_df))
 
   required_cols <- c(
-    "R", "T", "analysis_flag", "flag0", "flag1", "flag2",
-    "model", "residualizer", "exclusion", "c_order",
-    "free_loadings", "bootstrap_B", "bootstrap_prop_success",
-    "improper_reason", "bootstrap_issue_vector",
+    "R", "T", "analysis_flag",
+    "flag0", "flag1", "flag2",
+    "improper_reason",
+    "model", "residualizer",
+    "sem_exclusion", "sem_c_order",
+    "residualizer_exclusion", "residualizer_c_order",
+    "free_loadings",
     "beta_x", "beta_y", "gamma_xy", "gamma_yx",
+    "true_r2_x", "true_r2_y",
+    "mse_x", "mse_y", "r2_x", "r2_y",
     "ARX", "ARY", "CXY", "CYX",
-    "se_ARX", "se_ARY", "se_CXY", "se_CYX",
-    "mse_x", "r2_x", "mse_y", "r2_y"
+    "se_ARX", "se_ARY", "se_CXY", "se_CYX"
   )
 
   missing_cols <- setdiff(required_cols, names(results_df))
   if (length(missing_cols) > 0) {
-    stop("Missing required columns: ", paste(missing_cols, collapse = ", "))
+    stop(
+      "Missing required columns: ",
+      paste(missing_cols, collapse = ", ")
+    )
+  }
+
+  if (!is.null(occasions) && !is.numeric(occasions)) {
+    stop("occasions must be NULL or a numeric vector.")
   }
 
   if (!is.numeric(alpha) || length(alpha) != 1 || alpha <= 0 || alpha >= 1) {
     stop("alpha must be a single number in (0, 1).")
   }
 
-  # ==============================================================================
-  # 2. Small helper objects and helper functions
-  # ==============================================================================
+  if (!is.numeric(improper_top_n) || length(improper_top_n) != 1 || improper_top_n < 1) {
+    stop("improper_top_n must be a single positive number.")
+  }
 
-  # Compact model code -> readable model family name
-  model_map <- c(
-    "C" = "CLPM",
-    "R" = "RI-CLPM",
-    "D" = "DPM"
-  )
+  # If multiple scenarios or sample sizes are present, this overview will pool
+  # across them. That may be intended, but it is worth warning about.
+  scenario_cols_present <- intersect(c("scenario_id", "scenario_label", "N"), names(results_df))
+  if (length(scenario_cols_present) > 0 && print_messages) {
+    varying_counts <- vapply(
+      scenario_cols_present,
+      function(v) dplyr::n_distinct(results_df[[v]], na.rm = TRUE),
+      numeric(1)
+    )
 
-  # Compact residualiser code -> readable residualiser name
-  resid_map <- c(
-    "N" = "None",
-    "L" = "LM",
-    "X" = "XGB",
-    "E" = "EN"
-  )
+    if (any(varying_counts > 1)) {
+      message(
+        "Note: this data frame contains multiple values for: ",
+        paste(names(varying_counts)[varying_counts > 1], collapse = ", "),
+        ". This overview aggregates across them."
+      )
+    }
+  }
 
-  # Clean helper:
-  # turn "" into NA, keep everything as character
-  clean_text <- function(x) {
+  # ============================================================================
+  # 2. SMALL HELPER FUNCTIONS
+  # ============================================================================
+  # These helpers keep the main body readable and ensure consistent logic across
+  # all summaries and plots.
+
+  # Convert input to plain character and treat empty strings as missing.
+  clean_chr <- function(x) {
     x <- as.character(x)
     x[is.na(x) | x == ""] <- NA_character_
     x
   }
 
-  # Shared grouped mean + MCSE helper
-  # Used for summaries where the target is just mean(value) and MCSE of that mean.
+  # Convert compact SEM model codes to readable labels.
+  model_label <- function(model_code, free_loadings = NA) {
+    model_code <- clean_chr(model_code)
+
+    dplyr::case_when(
+      model_code == "C" & !is.na(free_loadings) & free_loadings == 1 ~ "fCLPM",
+      model_code == "C" ~ "CLPM",
+      model_code == "R" & !is.na(free_loadings) & free_loadings == 1 ~ "fRI-CLPM",
+      model_code == "R" ~ "RI-CLPM",
+      model_code == "D" & !is.na(free_loadings) & free_loadings == 1 ~ "fDPM",
+      model_code == "D" ~ "DPM",
+      TRUE ~ model_code
+    )
+  }
+
+  # Convert residualizer codes to readable labels.
+  resid_label <- function(resid_code) {
+    resid_code <- clean_chr(resid_code)
+
+    dplyr::case_when(
+      resid_code == "N" ~ "None",
+      resid_code == "L" ~ "LM",
+      resid_code == "E" ~ "EN",
+      resid_code == "X" ~ "XGB",
+      TRUE ~ resid_code
+    )
+  }
+
+  # Missing exclusion values are displayed as "no".
+  fmt_excl <- function(x) {
+    x <- clean_chr(x)
+    ifelse(is.na(x), "no", x)
+  }
+
+  # Convert order values to character for display use.
+  fmt_order <- function(x) {
+    ifelse(is.na(x), NA_character_, as.character(x))
+  }
+
+  # Generic grouped mean + MCSE helper:
+  #   mean(V)
+  #   MCSE(mean(V)) = sd(V) / sqrt(n)
   summarise_mean_mcse <- function(data, value_col, mean_name, mcse_name, group_cols) {
     data %>%
       dplyr::group_by(dplyr::across(dplyr::all_of(group_cols))) %>%
@@ -90,24 +204,25 @@ plot_engine_results <- function(results_df,
       )
   }
 
-  # ------------------------------------------------------------------------------
-  # Generic line plot helper
+  # Helpers for ordering labels separately within facets in the improper-reason
+  # plot, without introducing another package dependency.
+  reorder_within_base <- function(x, by, within, fun = mean, sep = "___") {
+    stats::reorder(paste(x, within, sep = sep), by, FUN = fun)
+  }
+
+  strip_reorder_suffix <- function(x, sep = "___") {
+    gsub(paste0(sep, ".*$"), "", x)
+  }
+
+  # --------------------------------------------------------------------------
+  # Generic line-plot helper used across the overview suite.
   #
-  # This is the central plotting engine used by the main/family/diagnostic plots.
-  # Arguments:
-  #   data        : plotting data frame
-  #   y           : name of y column
-  #   color_var   : grouping/color variable
-  #   group_var   : line grouping variable
-  #   facet_var   : optional facet variable
-  #   y_se        : optional standard error / MCSE column for error bars
-  #   palette     : named vector of colours
-  #   y_label     : y axis label
-  #   ref_line    : optional horizontal reference line
-  #   zero_line   : add y = 0 dashed line
-  #   percent_y   : format y axis as percentages
-  #   clamp_01    : clamp errorbars and axis to [0, 1]
-  # ------------------------------------------------------------------------------
+  # Features:
+  # - optional uncertainty bars,
+  # - optional constant reference line,
+  # - optional time-varying reference line from a separate data frame,
+  # - shared visual style across the plot suite.
+  # --------------------------------------------------------------------------
   make_line_plot <- function(data,
                              y,
                              color_var,
@@ -117,6 +232,9 @@ plot_engine_results <- function(results_df,
                              palette = NULL,
                              y_label = NULL,
                              ref_line = NULL,
+                             ref_df = NULL,
+                             ref_y = NULL,
+                             ref_linetype = "dotted",
                              zero_line = FALSE,
                              percent_y = FALSE,
                              clamp_01 = FALSE) {
@@ -133,7 +251,7 @@ plot_engine_results <- function(results_df,
       ggplot2::geom_line(linewidth = 0.9) +
       ggplot2::geom_point(size = 2)
 
-    # Add MCSE / uncertainty bars if requested
+    # Optional uncertainty bars.
     if (!is.null(y_se)) {
       if (clamp_01) {
         p <- p +
@@ -158,54 +276,70 @@ plot_engine_results <- function(results_df,
       }
     }
 
-    # Add faceting if requested
-    if (!is.null(facet_var)) {
-      p <- p + ggplot2::facet_wrap(stats::as.formula(paste("~", facet_var)), nrow = 1, scales = "fixed")
+    # Optional time-varying theoretical / true reference line.
+    if (!is.null(ref_df) && !is.null(ref_y)) {
+      p <- p +
+        ggplot2::geom_line(
+          data = ref_df,
+          mapping = ggplot2::aes(x = T, y = .data[[ref_y]]),
+          inherit.aes = FALSE,
+          color = "black",
+          linetype = ref_linetype,
+          linewidth = 0.7
+        )
     }
 
-    # Apply manual palette if given
+    # Optional constant reference line.
+    if (!is.null(ref_line)) {
+      p <- p +
+        ggplot2::geom_hline(
+          yintercept = ref_line,
+          linetype = "dashed",
+          linewidth = 0.4
+        )
+    }
+
+    if (zero_line) {
+      p <- p +
+        ggplot2::geom_hline(
+          yintercept = 0,
+          linetype = "dashed",
+          linewidth = 0.4
+        )
+    }
+
+    if (!is.null(facet_var)) {
+      p <- p +
+        ggplot2::facet_wrap(
+          stats::as.formula(paste("~", facet_var)),
+          nrow = 1,
+          scales = "fixed"
+        )
+    }
+
     if (!is.null(palette)) {
       p <- p + ggplot2::scale_color_manual(values = palette, drop = FALSE)
     }
 
-    # X-axis breaks = all observed occasions in the supplied data
     p <- p + ggplot2::scale_x_continuous(breaks = sort(unique(data$T)))
 
-    # Optional y-axis formatting as percent
     if (percent_y) {
       if (clamp_01) {
-        p <- p + ggplot2::scale_y_continuous(
-          labels = function(x) scales::percent(x, accuracy = 1),
-          limits = c(0, 1)
-        )
+        p <- p +
+          ggplot2::scale_y_continuous(
+            labels = function(x) scales::percent(x, accuracy = 1),
+            limits = c(0, 1)
+          )
       } else {
-        p <- p + ggplot2::scale_y_continuous(
-          labels = function(x) scales::percent(x, accuracy = 1)
-        )
+        p <- p +
+          ggplot2::scale_y_continuous(
+            labels = function(x) scales::percent(x, accuracy = 1)
+          )
       }
     }
 
-    # Optional horizontal reference lines
-    if (!is.null(ref_line)) {
-      p <- p + ggplot2::geom_hline(
-        yintercept = ref_line,
-        linetype = "dashed",
-        linewidth = 0.4
-      )
-    }
-
-    if (zero_line) {
-      p <- p + ggplot2::geom_hline(
-        yintercept = 0,
-        linetype = "dashed",
-        linewidth = 0.4
-      )
-    }
-
-    # Shared theme / labelling
     p +
       ggplot2::labs(
-        title = NULL,
         x = "Occasion",
         y = y_label,
         color = NULL
@@ -215,22 +349,18 @@ plot_engine_results <- function(results_df,
         strip.text = ggplot2::element_text(size = 12),
         axis.title = ggplot2::element_text(size = 13),
         axis.text = ggplot2::element_text(size = 12),
-        plot.title = ggplot2::element_blank(),
         legend.position = "bottom",
         legend.text = ggplot2::element_text(size = 11)
       )
   }
 
-  # ------------------------------------------------------------------------------
-  # Family-specific wrapper:
-  # keep only methods from one SEM family, then call the generic line plot helper
-  # ------------------------------------------------------------------------------
+  # Family-specific wrapper around the generic line-plot helper.
   make_family_plot <- function(data,
                                y,
-                               y_se,
                                family_name,
                                method_key,
-                               pal_method,
+                               palette,
+                               y_se = NULL,
                                y_label = NULL,
                                ref_line = NULL,
                                zero_line = FALSE,
@@ -238,7 +368,7 @@ plot_engine_results <- function(results_df,
                                clamp_01 = FALSE) {
 
     family_methods <- method_key %>%
-      dplyr::filter(.data$family == .env$family_name) %>%
+      dplyr::filter(family == .env$family_name) %>%
       dplyr::pull(method) %>%
       unique()
 
@@ -246,7 +376,7 @@ plot_engine_results <- function(results_df,
       dplyr::filter(method %in% family_methods) %>%
       dplyr::mutate(method = factor(as.character(method), levels = family_methods))
 
-    family_palette <- pal_method[family_methods]
+    family_palette <- palette[family_methods]
 
     make_line_plot(
       data = family_data,
@@ -264,134 +394,206 @@ plot_engine_results <- function(results_df,
     )
   }
 
-  # ==============================================================================
-  # 3. Prepare the master analysis data set
-  # ==============================================================================
+  # Generic horizontal bar plot helper for the flag summaries.
+  make_flag_bar_plot <- function(data, x, x_label, decreasing = TRUE, palette = NULL) {
+    plot_df <- data %>%
+      dplyr::arrange(if (decreasing) dplyr::desc(.data[[x]]) else .data[[x]]) %>%
+      dplyr::mutate(method = factor(method, levels = method))
 
-  # The original code created labels with row-wise pmap().
-  # This version does the same work vectorially, which is much faster on large data.
+    p <- ggplot2::ggplot(
+      plot_df,
+      ggplot2::aes(
+        x = .data[[x]],
+        y = method,
+        fill = method
+      )
+    ) +
+      ggplot2::geom_col(width = 0.75, show.legend = FALSE) +
+      ggplot2::scale_x_continuous(labels = function(v) scales::percent(v, accuracy = 1)) +
+      ggplot2::labs(
+        x = x_label,
+        y = NULL
+      ) +
+      ggplot2::theme_classic(base_size = 13) +
+      ggplot2::theme(
+        axis.title = ggplot2::element_text(size = 13),
+        axis.text = ggplot2::element_text(size = 11)
+      )
+
+    if (!is.null(palette)) {
+      p <- p + ggplot2::scale_fill_manual(values = palette, drop = FALSE)
+    }
+
+    p
+  }
+
+  # --------------------------------------------------------------------------
+  # Helper to extract the true delta trajectories from the list column
+  # true_delta_t_vector.
+  #
+  # This is a purely "truth" based object. It does not depend on fitted model
+  # performance at all. It only reshapes the stored data-generating deltas into
+  # a tidy table that can be plotted.
+  #
+  # Expected input structure:
+  #   each row contains a named numeric vector such as
+  #   c("x__c1" = ..., "x__c2" = ..., "y__c1" = ..., ...)
+  #
+  # Output columns:
+  #   - T
+  #   - delta_name
+  #   - delta
+  #   - outcome      (e.g. "x" or "y")
+  #   - confounder   (e.g. "c1", "c2", ...)
+  #
+  # Distinct rows are used first because the same true delta vector is often
+  # repeated many times in the simulation output.
+  # --------------------------------------------------------------------------
+  extract_true_delta_df <- function(data) {
+    if (!"true_delta_t_vector" %in% names(data)) {
+      return(tibble::tibble())
+    }
+
+    delta_base <- data %>%
+      dplyr::select(T, true_delta_t_vector) %>%
+      dplyr::filter(!purrr::map_lgl(true_delta_t_vector, is.null)) %>%
+      dplyr::distinct()
+
+    if (nrow(delta_base) == 0) {
+      return(tibble::tibble())
+    }
+
+    delta_df <- delta_base %>%
+      tidyr::unnest_longer(
+        true_delta_t_vector,
+        values_to = "delta",
+        indices_to = "delta_name"
+      ) %>%
+      tidyr::separate(
+        delta_name,
+        into = c("outcome", "confounder"),
+        sep = "__",
+        remove = FALSE,
+        fill = "right"
+      ) %>%
+      dplyr::mutate(
+        outcome = clean_chr(outcome),
+        confounder = clean_chr(confounder)
+      ) %>%
+      dplyr::arrange(outcome, confounder, T)
+
+    delta_df
+  }
+
+  # ============================================================================
+  # 3. STANDARDISE / PREPARE THE MASTER TABLE ONCE
+  # ============================================================================
+  # This is the central wrangling block.
+  #
+  # The idea is to create the reusable display columns and IDs once and then
+  # reuse them across all summaries and plots.
 
   df_all <- results_df %>%
     dplyr::mutate(
-      # Clean common string-like fields once
-      exclusion = clean_text(exclusion),
-      c_order = clean_text(c_order),
-      free_loadings = clean_text(free_loadings),
-      bootstrap_B = clean_text(bootstrap_B),
-      improper_reason = clean_text(improper_reason),
+      model = clean_chr(model),
+      residualizer = clean_chr(residualizer),
+      sem_exclusion = clean_chr(sem_exclusion),
+      residualizer_exclusion = clean_chr(residualizer_exclusion),
+      improper_reason = clean_chr(improper_reason),
 
-      # Expand compact model/residualiser codes
-      model_full = dplyr::recode(as.character(model), !!!model_map, .default = as.character(model)),
-      resid_full = dplyr::recode(as.character(residualizer), !!!resid_map, .default = as.character(residualizer)),
+      model_tag = model_label(model, free_loadings),
+      residualizer_tag = resid_label(residualizer),
 
-      # Numeric versions used in label construction
-      c_order_num = suppressWarnings(as.numeric(c_order)),
-      free_loadings_num = suppressWarnings(as.numeric(free_loadings)),
-
-      # Free-loading variants get renamed
-      model_full = dplyr::case_when(
-        !is.na(free_loadings_num) & free_loadings_num == 1 & model_full == "RI-CLPM" ~ "fRI-CLPM",
-        !is.na(free_loadings_num) & free_loadings_num == 1 & model_full == "DPM" ~ "fDPM",
-        TRUE ~ model_full
+      family = dplyr::case_when(
+        model == "C" ~ "CLPM",
+        model == "R" ~ "RI-CLPM",
+        model == "D" ~ "DPM",
+        TRUE ~ "Other"
       ),
 
-      # Unadjusted = no residualisation / no BCA wrapper
-      is_unadjusted = is.na(resid_full) | resid_full == "None",
+      sem_excl_disp = fmt_excl(sem_exclusion),
+      resid_excl_disp = fmt_excl(residualizer_exclusion),
+      sem_order_disp = fmt_order(sem_c_order),
+      resid_order_disp = fmt_order(residualizer_c_order),
 
-      # Base method label
-      base_label = dplyr::case_when(
-        is.na(resid_full) ~ model_full,
-        resid_full == "None" ~ model_full,
-        TRUE ~ paste("BCA", resid_full, model_full)
+      # Compact readable method label used in legends and bar plots.
+      method = dplyr::case_when(
+        residualizer_tag == "None" ~
+          paste0(
+            model_tag,
+            " [sem ", dplyr::coalesce(sem_order_disp, "NA"),
+            "; excl=", sem_excl_disp, "]"
+          ),
+        TRUE ~
+          paste0(
+            residualizer_tag,
+            " [resid ", dplyr::coalesce(resid_order_disp, "NA"),
+            "; excl=", resid_excl_disp, "] + ",
+            model_tag,
+            " [sem ", dplyr::coalesce(sem_order_disp, "NA"),
+            "; excl=", sem_excl_disp, "]"
+          )
       ),
 
-      # Detail component shown in brackets
-      detail_part = dplyr::case_when(
-        # Simple unadjusted RI-CLPM / DPM variants: no bracket detail
-        is_unadjusted & model_full %in% c("RI-CLPM", "fRI-CLPM", "DPM", "fDPM") ~ NA_character_,
-
-        # Keep CLPM confounder order visible even when unadjusted
-        is_unadjusted & model_full == "CLPM" & !is.na(c_order_num) ~ as.character(c_order_num),
-        is_unadjusted & model_full == "CLPM" & is.na(c_order_num) ~ "0",
-
-        # Adjustment cases: show order and exclusion if both exist
-        !is.na(c_order_num) & !is.na(exclusion) ~ paste0(c_order_num, ":", exclusion),
-        !is.na(c_order_num) ~ as.character(c_order_num),
-        !is.na(exclusion) ~ exclusion,
-        TRUE ~ NA_character_
-      ),
-
-      # Final display label
-      method = dplyr::if_else(
-        is.na(detail_part),
-        base_label,
-        paste0(base_label, " (", detail_part, ")")
-      ),
-
-      # Stable identifier for grouping methods exactly
+      # Stable exact-method identifier.
       method_id = paste(
-        paste0("model=", clean_text(model)),
-        paste0("resid=", clean_text(residualizer)),
-        paste0("excl=", clean_text(exclusion)),
-        paste0("corder=", clean_text(c_order)),
-        paste0("free=", clean_text(free_loadings)),
+        paste0("model=", clean_chr(model)),
+        paste0("resid=", clean_chr(residualizer)),
+        paste0("sem_excl=", clean_chr(sem_exclusion)),
+        paste0("sem_c=", sem_c_order),
+        paste0("resid_excl=", clean_chr(residualizer_exclusion)),
+        paste0("resid_c=", residualizer_c_order),
+        paste0("free=", free_loadings),
         sep = " | "
       ),
 
-      # ML diagnostics collapse over SEM model, so only residualiser matters there
-      ml_method = dplyr::recode(
-        as.character(residualizer),
-        "L" = "LM",
-        "E" = "EN",
-        "X" = "XGB",
-        "N" = NA_character_,
-        .default = as.character(residualizer)
-      ),
-      ml_method_id = paste0("resid=", clean_text(residualizer))
-    ) %>%
-    dplyr::filter(T %in% occasions)
+      # ML-only method label and ID.
+      ml_method = residualizer_tag,
+      ml_method_id = paste0("resid=", clean_chr(residualizer))
+    )
 
-  # Main analysis subset:
-  # optionally keep only admissible runs
-  df <- df_all
-  if (drop_flagged) {
-    df <- df %>% dplyr::filter(analysis_flag == 0)
+  if (!is.null(occasions)) {
+    df_all <- df_all %>% dplyr::filter(T %in% occasions)
   }
 
-  # ==============================================================================
-  # 4. Build one long estimate/SE table and reuse it everywhere
-  # ==============================================================================
+  # Main subset used for parameter and ML summaries.
+  # Flag summaries use the separate run-level table below.
+  df_main <- df_all
+  if (drop_flagged) {
+    df_main <- df_main %>% dplyr::filter(analysis_flag == 0)
+  }
 
-  # This is one of the main speed improvements.
-  #
-  # We build a long table that contains, for each:
-  #   - simulation replicate R
-  #   - occasion T
-  #   - method
-  #   - estimand
-  # both:
-  #   - estimate
-  #   - se_estimate
-  # plus the matching true parameter value.
-  #
-  # Once this exists, relative bias / RMSE / SE / power / SE diagnostics all
-  # come from this same object.
+  # ============================================================================
+  # 4. BUILD THE LONG PARAMETER TABLE ONCE
+  # ============================================================================
+  # Backbone for:
+  # - relative bias,
+  # - RMSE,
+  # - mean SE,
+  # - power / detection,
+  # - SE calibration.
 
-  sim_long_all <- df_all %>%
+  df_all_id <- df_all %>%
+    dplyr::mutate(.row_id = dplyr::row_number())
+
+  est_long <- df_all_id %>%
     tidyr::pivot_longer(
-      cols = c(ARX, ARY, CXY, CYX, se_ARX, se_ARY, se_CXY, se_CYX),
-      names_to = c("se_prefix", "estimand"),
-      names_pattern = "(se_)?(ARX|ARY|CXY|CYX)",
-      values_to = "value"
+      cols = c(ARX, ARY, CXY, CYX),
+      names_to = "estimand",
+      values_to = "estimate"
+    )
+
+  se_long <- df_all_id %>%
+    tidyr::pivot_longer(
+      cols = c(se_ARX, se_ARY, se_CXY, se_CYX),
+      names_to = "estimand",
+      names_prefix = "se_",
+      values_to = "se_estimate"
     ) %>%
-    dplyr::mutate(
-      value_type = dplyr::if_else(is.na(se_prefix), "estimate", "se_estimate")
-    ) %>%
-    dplyr::select(-se_prefix) %>%
-    tidyr::pivot_wider(
-      names_from = value_type,
-      values_from = value
-    ) %>%
+    dplyr::select(.row_id, estimand, se_estimate)
+
+  sim_long_all <- est_long %>%
+    dplyr::left_join(se_long, by = c(".row_id", "estimand")) %>%
     dplyr::mutate(
       true = dplyr::case_when(
         estimand == "ARX" ~ beta_x,
@@ -407,57 +609,108 @@ plot_engine_results <- function(results_df,
     sim_long <- sim_long %>% dplyr::filter(analysis_flag == 0)
   }
 
-  # ==============================================================================
-  # 5. Classic performance summaries
-  # ==============================================================================
+  # ============================================================================
+  # 5. BUILD THE ML LONG TABLE ONCE
+  # ============================================================================
+  # Reusable table for MSE / R² summaries and plots.
+  # Only actual residualizer methods are relevant here.
 
-  # ------------------------------------------------------------------------------
-  # Relative bias
-  #
-  # rel_bias = (mean estimate - true) / true
-  # MCSE derived from the SD of the estimate divided by sqrt(n), then rescaled
-  # by |true| to put it on the relative-bias scale.
-  # ------------------------------------------------------------------------------
+  ml_long <- df_main %>%
+    dplyr::filter(residualizer != "N", !is.na(ml_method), ml_method != "None") %>%
+    tidyr::pivot_longer(
+      cols = c(mse_x, mse_y, r2_x, r2_y),
+      names_to = "metric_name",
+      values_to = "value"
+    ) %>%
+    dplyr::mutate(
+      metric = dplyr::case_when(
+        metric_name %in% c("mse_x", "mse_y") ~ "MSE",
+        metric_name %in% c("r2_x", "r2_y") ~ "R2",
+        TRUE ~ NA_character_
+      ),
+      target = dplyr::case_when(
+        metric_name %in% c("mse_x", "r2_x") ~ "X",
+        metric_name %in% c("mse_y", "r2_y") ~ "Y",
+        TRUE ~ NA_character_
+      )
+    ) %>%
+    dplyr::filter(!is.na(metric), !is.na(target), !is.na(value))
+
+  # ============================================================================
+  # 6. BUILD THE RUN-LEVEL TABLE ONCE FOR FLAGS / IMPROPER REASONS
+  # ============================================================================
+  # flag0 / flag1 / flag2 are run-level outcomes, not really time-varying
+  # outcomes. The raw data usually repeats them across T, so we collapse to one
+  # row per replicate-method combination.
+
+  run_level <- df_all %>%
+    dplyr::group_by(method_id, method, family, R) %>%
+    dplyr::summarise(
+      flag0 = dplyr::first(flag0),
+      flag1 = dplyr::first(flag1),
+      flag2 = dplyr::first(flag2),
+      improper_reason = dplyr::first(improper_reason),
+      .groups = "drop"
+    )
+
+  # ============================================================================
+  # 6B. BUILD THE TRUE-DELTA TABLE ONCE
+  # ============================================================================
+  # This table is independent of the fitted model summaries. It only reflects the
+  # stored data-generating delta values over time.
+
+  true_delta_df <- extract_true_delta_df(df_all)
+
+  if (nrow(true_delta_df) > 0 && print_messages) {
+    n_distinct_delta_vectors <- df_all %>%
+      dplyr::select(T, true_delta_t_vector) %>%
+      dplyr::distinct() %>%
+      nrow()
+
+    if (n_distinct_delta_vectors == 1) {
+      message(
+        "Note: true_delta_t_vector appears constant across the retained rows. ",
+        "The delta plot will therefore show flat lines over time."
+      )
+    }
+  }
+
+  # ============================================================================
+  # 7. SUMMARY TABLES
+  # ============================================================================
+
+  # --------------------------------------------------------------------------
+  # 7A. Relative bias
+  # --------------------------------------------------------------------------
   relbias_df <- sim_long %>%
-    dplyr::filter(!is.na(estimate)) %>%
-    dplyr::group_by(T, estimand, method_id, method) %>%
+    dplyr::filter(!is.na(estimate), !is.na(true)) %>%
+    dplyr::group_by(T, estimand, method_id, method, family) %>%
     dplyr::summarise(
       nsim = dplyr::n(),
       true = dplyr::first(true),
       mean_est = mean(estimate, na.rm = TRUE),
       rel_bias = dplyr::if_else(
-        is.na(true) | abs(true) < 1e-12,
+        abs(true) < 1e-12,
         NA_real_,
         (mean_est - true) / true
       ),
       mcse_rel_bias = dplyr::if_else(
-        is.na(true) | abs(true) < 1e-12,
+        abs(true) < 1e-12,
         NA_real_,
         stats::sd(estimate, na.rm = TRUE) / sqrt(nsim) / abs(true)
       ),
       .groups = "drop"
     )
 
-  # ------------------------------------------------------------------------------
-  # RMSE
-  #
-  # rmse = sqrt(mean((estimate - true)^2))
-  #
-  # MCSE of RMSE is computed from the delta method:
-  #   if m = mean(sq_err), rmse = sqrt(m)
-  #   MCSE(rmse) ≈ sqrt(var(sq_err)/n) / (2 * rmse)
-  #
-  # This version avoids rowwise() and list-columns.
-  # ------------------------------------------------------------------------------
+  # --------------------------------------------------------------------------
+  # 7B. RMSE
+  # --------------------------------------------------------------------------
   rmse_df <- sim_long %>%
-    dplyr::filter(!is.na(estimate)) %>%
-    dplyr::mutate(
-      sq_err = (estimate - true)^2
-    ) %>%
-    dplyr::group_by(T, estimand, method_id, method) %>%
+    dplyr::filter(!is.na(estimate), !is.na(true)) %>%
+    dplyr::mutate(sq_err = (estimate - true)^2) %>%
+    dplyr::group_by(T, estimand, method_id, method, family) %>%
     dplyr::summarise(
       nsim = dplyr::n(),
-      true = dplyr::first(true),
       mean_sq_err = mean(sq_err, na.rm = TRUE),
       var_sq_err = stats::var(sq_err, na.rm = TRUE),
       rmse = sqrt(mean_sq_err),
@@ -470,26 +723,26 @@ plot_engine_results <- function(results_df,
     ) %>%
     dplyr::select(-mean_sq_err, -var_sq_err)
 
-  # ------------------------------------------------------------------------------
-  # Mean reported SE
-  # ------------------------------------------------------------------------------
+  # --------------------------------------------------------------------------
+  # 7C. Mean reported SE
+  # --------------------------------------------------------------------------
   se_df <- summarise_mean_mcse(
-    data = sim_long %>% dplyr::filter(!is.na(se_estimate)),
+    data = sim_long %>%
+      dplyr::filter(!is.na(se_estimate)),
     value_col = "se_estimate",
     mean_name = "mean_se",
     mcse_name = "mcse_mean_se",
-    group_cols = c("T", "estimand", "method_id", "method")
+    group_cols = c("T", "estimand", "method_id", "method", "family")
   )
 
-  # ------------------------------------------------------------------------------
-  # Detection / power summary
+  # --------------------------------------------------------------------------
+  # 7D. Detection / power summary
   #
-  # Two-sided Wald test at level alpha:
-  #   detected = |estimate / se_estimate| > z_(1 - alpha/2)
+  # detected = |estimate / se_estimate| > z_(1 - alpha/2)
   #
-  # If true effect is 0, the plot is a Type I error plot.
-  # Otherwise it is a power plot.
-  # ------------------------------------------------------------------------------
+  # If true = 0, the result is a Type I error rate.
+  # If true != 0, the result is power.
+  # --------------------------------------------------------------------------
   crit_z <- stats::qnorm(1 - alpha / 2)
 
   detect_df <- sim_long %>%
@@ -498,7 +751,7 @@ plot_engine_results <- function(results_df,
       z_value = estimate / se_estimate,
       detected = abs(z_value) > crit_z
     ) %>%
-    dplyr::group_by(T, estimand, method_id, method) %>%
+    dplyr::group_by(T, estimand, method_id, method, family) %>%
     dplyr::summarise(
       nsim = dplyr::n(),
       true = dplyr::first(true),
@@ -508,84 +761,26 @@ plot_engine_results <- function(results_df,
       .groups = "drop"
     )
 
-  # ==============================================================================
-  # 6. SE calibration diagnostics
-  # ==============================================================================
-
-  # These are defined on admissible main-analysis runs only.
-  # That behaviour is preserved.
-  sim_long_used <- sim_long_all %>%
-    dplyr::filter(
-      analysis_flag == 0,
-      !is.na(estimate),
-      !is.na(se_estimate)
-    )
-
-  se_check <- sim_long_used %>%
-    dplyr::group_by(T, estimand, method_id, method) %>%
+  # --------------------------------------------------------------------------
+  # 7E. SE calibration check
+  # --------------------------------------------------------------------------
+  se_check <- sim_long %>%
+    dplyr::filter(!is.na(estimate), !is.na(se_estimate)) %>%
+    dplyr::group_by(T, estimand, method_id, method, family) %>%
     dplyr::summarise(
       nsim = dplyr::n(),
-      emp_sd = stats::sd(estimate, na.rm = TRUE),
+      mc_sd = stats::sd(estimate, na.rm = TRUE),
       mean_se = mean(se_estimate, na.rm = TRUE),
-      diff = mean_se - emp_sd,
-      ratio = dplyr::if_else(emp_sd > 0, mean_se / emp_sd, NA_real_),
+      diff = mean_se - mc_sd,
+      ratio = dplyr::if_else(mc_sd > 0, mean_se / mc_sd, NA_real_),
       .groups = "drop"
     )
 
-  # ==============================================================================
-  # 7. Flag summaries
-  # ==============================================================================
-
-  # Flag summaries are still computed and returned as data frames.
-  # Only the flag plots have been removed from this version.
-
-  flag_df <- df_all %>%
-    tidyr::pivot_longer(
-      cols = c(flag0, flag1, flag2),
-      names_to = "flag_type",
-      values_to = "flag_value"
-    ) %>%
-    dplyr::group_by(T, method_id, method, flag_type) %>%
-    dplyr::summarise(
-      prop_flag = mean(flag_value, na.rm = TRUE),
-      .groups = "drop"
-    )
-
-  flag0_df <- flag_df %>% dplyr::filter(flag_type == "flag0") %>% dplyr::select(-flag_type)
-  flag1_df <- flag_df %>% dplyr::filter(flag_type == "flag1") %>% dplyr::select(-flag_type)
-  flag2_df <- flag_df %>% dplyr::filter(flag_type == "flag2") %>% dplyr::select(-flag_type)
-
-  # ==============================================================================
-  # 8. ML diagnostics
-  # ==============================================================================
-
-  # ML diagnostics are attached to the residualiser, not the downstream SEM method.
-  # So all ML summaries are grouped by ml_method only.
-  df_ml <- df %>%
-    dplyr::filter(residualizer != "N", !is.na(ml_method))
-
-  ml_long_df <- df_ml %>%
-    tidyr::pivot_longer(
-      cols = c(mse_x, r2_x, mse_y, r2_y),
-      names_to = "ml_name",
-      values_to = "value"
-    ) %>%
-    dplyr::mutate(
-      metric = dplyr::case_when(
-        ml_name %in% c("mse_x", "mse_y") ~ "MSE",
-        ml_name %in% c("r2_x", "r2_y") ~ "R2",
-        TRUE ~ NA_character_
-      ),
-      target = dplyr::case_when(
-        ml_name %in% c("mse_x", "r2_x") ~ "X",
-        ml_name %in% c("mse_y", "r2_y") ~ "Y",
-        TRUE ~ NA_character_
-      )
-    ) %>%
-    dplyr::filter(!is.na(metric), !is.na(target), !is.na(value))
-
+  # --------------------------------------------------------------------------
+  # 7F. ML summaries
+  # --------------------------------------------------------------------------
   mse_df <- summarise_mean_mcse(
-    data = ml_long_df %>% dplyr::filter(metric == "MSE"),
+    data = ml_long %>% dplyr::filter(metric == "MSE"),
     value_col = "value",
     mean_name = "mean_mse",
     mcse_name = "mcse_mean_mse",
@@ -593,114 +788,130 @@ plot_engine_results <- function(results_df,
   )
 
   r2_df <- summarise_mean_mcse(
-    data = ml_long_df %>% dplyr::filter(metric == "R2"),
+    data = ml_long %>% dplyr::filter(metric == "R2"),
     value_col = "value",
     mean_name = "mean_r2",
     mcse_name = "mcse_mean_r2",
     group_cols = c("T", "target", "ml_method_id", "ml_method")
   )
 
-  # ==============================================================================
-  # 9. Method ordering and palettes
-  # ==============================================================================
+  # --------------------------------------------------------------------------
+  # 7G. Theoretical reference lines for MSE and R²
+  #
+  # If variance is 1, and true confounder-induced R² is known, then the best
+  # achievable MSE is:
+  #
+  #   theoretical minimum MSE = 1 - true_R²
+  #
+  # For R², the reference line is the true confounder-induced R² itself.
+  # --------------------------------------------------------------------------
+  theory_df <- df_all %>%
+    dplyr::group_by(T) %>%
+    dplyr::summarise(
+      true_r2_x = mean(true_r2_x, na.rm = TRUE),
+      true_r2_y = mean(true_r2_y, na.rm = TRUE),
+      theoretical_min_mse_x = 1 - true_r2_x,
+      theoretical_min_mse_y = 1 - true_r2_y,
+      .groups = "drop"
+    )
 
-  # Method ordering is preserved in a readable family-first way:
-  # RI-CLPM methods, then DPM, then CLPM, then anything else.
-  method_key <- df_all %>%
-    dplyr::distinct(method_id, method) %>%
+  # --------------------------------------------------------------------------
+  # 7H. Flag summaries
+  # --------------------------------------------------------------------------
+  flag0_df <- run_level %>%
+    dplyr::group_by(method_id, method, family) %>%
+    dplyr::summarise(
+      n_runs = dplyr::n(),
+      prop_flag0 = mean(flag0, na.rm = TRUE),
+      .groups = "drop"
+    )
+
+  flag1_df <- run_level %>%
+    dplyr::group_by(method_id, method, family) %>%
+    dplyr::summarise(
+      n_runs = dplyr::n(),
+      prop_flag1 = mean(flag1, na.rm = TRUE),
+      .groups = "drop"
+    )
+
+  flag2_df <- run_level %>%
+    dplyr::group_by(method_id, method, family) %>%
+    dplyr::summarise(
+      n_runs = dplyr::n(),
+      prop_flag2 = mean(flag2, na.rm = TRUE),
+      .groups = "drop"
+    )
+
+  # --------------------------------------------------------------------------
+  # 7I. Improper-reason summary
+  # --------------------------------------------------------------------------
+  improper_reason_df <- run_level %>%
+    dplyr::filter(flag2 == 1 | !is.na(improper_reason)) %>%
     dplyr::mutate(
-      family = dplyr::case_when(
-        grepl("^model=R\\b", method_id) ~ "RI-CLPM",
-        grepl("^model=D\\b", method_id) ~ "DPM",
-        grepl("^model=C\\b", method_id) ~ "CLPM",
-        TRUE ~ "Other"
+      improper_reason = dplyr::if_else(
+        is.na(improper_reason),
+        "unspecified improper reason",
+        improper_reason
       )
     ) %>%
+    dplyr::group_by(method_id, method, family, improper_reason) %>%
+    dplyr::summarise(
+      n_reason = dplyr::n(),
+      .groups = "drop_last"
+    ) %>%
+    dplyr::mutate(
+      n_improper_total = sum(n_reason),
+      prop_reason = n_reason / n_improper_total
+    ) %>%
+    dplyr::ungroup()
+
+  improper_reason_top_df <- improper_reason_df %>%
+    dplyr::group_by(method_id, method, family) %>%
+    dplyr::slice_max(order_by = n_reason, n = improper_top_n, with_ties = FALSE) %>%
+    dplyr::ungroup()
+
+  # ============================================================================
+  # 8. ORDERING AND PALETTES
+  # ============================================================================
+  # Consistent ordering makes it easier to compare plots.
+
+  method_key <- df_all %>%
+    dplyr::distinct(method_id, method, family) %>%
     dplyr::arrange(family, method)
 
   method_levels <- method_key$method
 
-  # Method palette for SEM methods
   pal_method <- setNames(
     scales::hue_pal()(length(method_levels)),
     method_levels
   )
 
-  # ML residualiser palette
-  ml_method_levels <- c("LM", "EN", "XGB")
+  ml_levels <- c("LM", "EN", "XGB")
+  ml_levels_present <- intersect(ml_levels, unique(df_all$ml_method))
   pal_ml <- setNames(
-    scales::hue_pal()(length(ml_method_levels)),
-    ml_method_levels
+    scales::hue_pal()(length(ml_levels_present)),
+    ml_levels_present
   )
 
-  # Apply common factor ordering to all returned summary frames that use method
   relbias_df$method <- factor(as.character(relbias_df$method), levels = method_levels)
   rmse_df$method <- factor(as.character(rmse_df$method), levels = method_levels)
   se_df$method <- factor(as.character(se_df$method), levels = method_levels)
   detect_df$method <- factor(as.character(detect_df$method), levels = method_levels)
   se_check$method <- factor(as.character(se_check$method), levels = method_levels)
+
   flag0_df$method <- factor(as.character(flag0_df$method), levels = method_levels)
   flag1_df$method <- factor(as.character(flag1_df$method), levels = method_levels)
   flag2_df$method <- factor(as.character(flag2_df$method), levels = method_levels)
+  improper_reason_df$method <- factor(as.character(improper_reason_df$method), levels = method_levels)
+  improper_reason_top_df$method <- factor(as.character(improper_reason_top_df$method), levels = method_levels)
 
-  mse_df$ml_method <- factor(as.character(mse_df$ml_method), levels = ml_method_levels)
-  r2_df$ml_method <- factor(as.character(r2_df$ml_method), levels = ml_method_levels)
+  mse_df$ml_method <- factor(as.character(mse_df$ml_method), levels = ml_levels_present)
+  r2_df$ml_method <- factor(as.character(r2_df$ml_method), levels = ml_levels_present)
 
-  # ==============================================================================
-  # 10. Main combined plots
-  # ==============================================================================
-
-  plot_relbias <- make_line_plot(
-    data = relbias_df,
-    y = "rel_bias",
-    color_var = "method",
-    group_var = "method_id",
-    facet_var = "estimand",
-    y_se = "mcse_rel_bias",
-    palette = pal_method,
-    y_label = NULL,
-    zero_line = TRUE
-  )
-
-  plot_rmse <- make_line_plot(
-    data = rmse_df,
-    y = "rmse",
-    color_var = "method",
-    group_var = "method_id",
-    facet_var = "estimand",
-    y_se = "mcse_rmse",
-    palette = pal_method,
-    y_label = NULL
-  )
-
-  plot_se <- make_line_plot(
-    data = se_df,
-    y = "mean_se",
-    color_var = "method",
-    group_var = "method_id",
-    facet_var = "estimand",
-    y_se = "mcse_mean_se",
-    palette = pal_method,
-    y_label = NULL
-  )
-
-  plot_power <- make_line_plot(
-    data = detect_df,
-    y = "detect_prob",
-    color_var = "method",
-    group_var = "method_id",
-    facet_var = "estimand",
-    y_se = "mcse_detect",
-    palette = pal_method,
-    y_label = paste0("Detection probability (alpha = ", alpha, ")"),
-    ref_line = alpha,
-    percent_y = TRUE,
-    clamp_01 = TRUE
-  )
-
-  # ==============================================================================
-  # 11. Family-specific classic plots
-  # ==============================================================================
+  # ============================================================================
+  # 9. FAMILY-SPECIFIC SEM OVERVIEW PLOTS
+  # ============================================================================
+  # These are the main SEM overview plots.
 
   plot_relbias_clpm <- make_family_plot(
     data = relbias_df,
@@ -708,7 +919,8 @@ plot_engine_results <- function(results_df,
     y_se = "mcse_rel_bias",
     family_name = "CLPM",
     method_key = method_key,
-    pal_method = pal_method,
+    palette = pal_method,
+    y_label = "Relative bias",
     zero_line = TRUE
   )
 
@@ -718,7 +930,8 @@ plot_engine_results <- function(results_df,
     y_se = "mcse_rel_bias",
     family_name = "RI-CLPM",
     method_key = method_key,
-    pal_method = pal_method,
+    palette = pal_method,
+    y_label = "Relative bias",
     zero_line = TRUE
   )
 
@@ -728,7 +941,8 @@ plot_engine_results <- function(results_df,
     y_se = "mcse_rel_bias",
     family_name = "DPM",
     method_key = method_key,
-    pal_method = pal_method,
+    palette = pal_method,
+    y_label = "Relative bias",
     zero_line = TRUE
   )
 
@@ -738,7 +952,8 @@ plot_engine_results <- function(results_df,
     y_se = "mcse_rmse",
     family_name = "CLPM",
     method_key = method_key,
-    pal_method = pal_method
+    palette = pal_method,
+    y_label = "RMSE"
   )
 
   plot_rmse_riclpm <- make_family_plot(
@@ -747,7 +962,8 @@ plot_engine_results <- function(results_df,
     y_se = "mcse_rmse",
     family_name = "RI-CLPM",
     method_key = method_key,
-    pal_method = pal_method
+    palette = pal_method,
+    y_label = "RMSE"
   )
 
   plot_rmse_dpm <- make_family_plot(
@@ -756,7 +972,8 @@ plot_engine_results <- function(results_df,
     y_se = "mcse_rmse",
     family_name = "DPM",
     method_key = method_key,
-    pal_method = pal_method
+    palette = pal_method,
+    y_label = "RMSE"
   )
 
   plot_se_clpm <- make_family_plot(
@@ -765,7 +982,8 @@ plot_engine_results <- function(results_df,
     y_se = "mcse_mean_se",
     family_name = "CLPM",
     method_key = method_key,
-    pal_method = pal_method
+    palette = pal_method,
+    y_label = "Mean estimated SE"
   )
 
   plot_se_riclpm <- make_family_plot(
@@ -774,7 +992,8 @@ plot_engine_results <- function(results_df,
     y_se = "mcse_mean_se",
     family_name = "RI-CLPM",
     method_key = method_key,
-    pal_method = pal_method
+    palette = pal_method,
+    y_label = "Mean estimated SE"
   )
 
   plot_se_dpm <- make_family_plot(
@@ -783,8 +1002,14 @@ plot_engine_results <- function(results_df,
     y_se = "mcse_mean_se",
     family_name = "DPM",
     method_key = method_key,
-    pal_method = pal_method
+    palette = pal_method,
+    y_label = "Mean estimated SE"
   )
+
+  # ============================================================================
+  # 10. FAMILY-SPECIFIC POWER PLOTS
+  # ============================================================================
+  # These are split by SEM family as requested.
 
   plot_power_clpm <- make_family_plot(
     data = detect_df,
@@ -792,7 +1017,7 @@ plot_engine_results <- function(results_df,
     y_se = "mcse_detect",
     family_name = "CLPM",
     method_key = method_key,
-    pal_method = pal_method,
+    palette = pal_method,
     y_label = paste0("Detection probability (alpha = ", alpha, ")"),
     ref_line = alpha,
     percent_y = TRUE,
@@ -805,7 +1030,7 @@ plot_engine_results <- function(results_df,
     y_se = "mcse_detect",
     family_name = "RI-CLPM",
     method_key = method_key,
-    pal_method = pal_method,
+    palette = pal_method,
     y_label = paste0("Detection probability (alpha = ", alpha, ")"),
     ref_line = alpha,
     percent_y = TRUE,
@@ -818,19 +1043,17 @@ plot_engine_results <- function(results_df,
     y_se = "mcse_detect",
     family_name = "DPM",
     method_key = method_key,
-    pal_method = pal_method,
+    palette = pal_method,
     y_label = paste0("Detection probability (alpha = ", alpha, ")"),
     ref_line = alpha,
     percent_y = TRUE,
     clamp_01 = TRUE
   )
 
-  # ==============================================================================
-  # 12. SE diagnostic plots
-  # ==============================================================================
-
-  # In this version, SE diagnostic plots are family-specific rather than combined.
-  # This matches the family-specific structure already used for bias/RMSE/SE/power.
+  # ============================================================================
+  # 11. FAMILY-SPECIFIC SE CALIBRATION PLOTS
+  # ============================================================================
+  # Axis titles cleaned up as requested.
 
   plot_se_ratio_clpm <- make_family_plot(
     data = se_check,
@@ -838,8 +1061,8 @@ plot_engine_results <- function(results_df,
     y_se = NULL,
     family_name = "CLPM",
     method_key = method_key,
-    pal_method = pal_method,
-    y_label = "Mean reported SE / empirical SD",
+    palette = pal_method,
+    y_label = "Est. SE / Monte Carlo SD",
     ref_line = 1
   )
 
@@ -849,8 +1072,8 @@ plot_engine_results <- function(results_df,
     y_se = NULL,
     family_name = "RI-CLPM",
     method_key = method_key,
-    pal_method = pal_method,
-    y_label = "Mean reported SE / empirical SD",
+    palette = pal_method,
+    y_label = "Est. SE / Monte Carlo SD",
     ref_line = 1
   )
 
@@ -860,8 +1083,8 @@ plot_engine_results <- function(results_df,
     y_se = NULL,
     family_name = "DPM",
     method_key = method_key,
-    pal_method = pal_method,
-    y_label = "Mean reported SE / empirical SD",
+    palette = pal_method,
+    y_label = "Est. SE / Monte Carlo SD",
     ref_line = 1
   )
 
@@ -871,8 +1094,8 @@ plot_engine_results <- function(results_df,
     y_se = NULL,
     family_name = "CLPM",
     method_key = method_key,
-    pal_method = pal_method,
-    y_label = "Mean reported SE - empirical SD",
+    palette = pal_method,
+    y_label = "Est. SE - Monte Carlo SD",
     ref_line = 0
   )
 
@@ -882,8 +1105,8 @@ plot_engine_results <- function(results_df,
     y_se = NULL,
     family_name = "RI-CLPM",
     method_key = method_key,
-    pal_method = pal_method,
-    y_label = "Mean reported SE - empirical SD",
+    palette = pal_method,
+    y_label = "Est. SE - Monte Carlo SD",
     ref_line = 0
   )
 
@@ -893,72 +1116,209 @@ plot_engine_results <- function(results_df,
     y_se = NULL,
     family_name = "DPM",
     method_key = method_key,
-    pal_method = pal_method,
-    y_label = "Mean reported SE - empirical SD",
+    palette = pal_method,
+    y_label = "Est. SE - Monte Carlo SD",
     ref_line = 0
   )
 
-  # ==============================================================================
-  # 13. ML plots
-  # ==============================================================================
+  # ============================================================================
+  # 12. ML OVERVIEW PLOTS
+  # ============================================================================
+  # Separate X and Y plots, each with the requested theoretical reference line.
 
-  plot_mse <- make_line_plot(
-    data = mse_df,
+  plot_mse_x <- make_line_plot(
+    data = mse_df %>% dplyr::filter(target == "X"),
     y = "mean_mse",
-    color_var = "ml_method",
-    group_var = "ml_method_id",
-    facet_var = "target",
     y_se = "mcse_mean_mse",
-    palette = pal_ml,
-    y_label = "Mean OOF MSE"
-  )
-
-  plot_r2 <- make_line_plot(
-    data = r2_df,
-    y = "mean_r2",
     color_var = "ml_method",
     group_var = "ml_method_id",
-    facet_var = "target",
-    y_se = "mcse_mean_r2",
     palette = pal_ml,
-    y_label = "Mean OOF R^2",
-    ref_line = 0
+    y_label = "Mean OOF MSE",
+    ref_df = theory_df,
+    ref_y = "theoretical_min_mse_x"
   )
 
-  # ==============================================================================
-  # 14. Return object
-  # ==============================================================================
+  plot_mse_y <- make_line_plot(
+    data = mse_df %>% dplyr::filter(target == "Y"),
+    y = "mean_mse",
+    y_se = "mcse_mean_mse",
+    color_var = "ml_method",
+    group_var = "ml_method_id",
+    palette = pal_ml,
+    y_label = "Mean OOF MSE",
+    ref_df = theory_df,
+    ref_y = "theoretical_min_mse_y"
+  )
 
-  # Keep the returned object names unchanged where possible.
-  # The only structural change is that:
-  #   - flag plots are omitted
-  #   - SE diagnostic plots are returned in family-specific form
+  plot_r2_x <- make_line_plot(
+    data = r2_df %>% dplyr::filter(target == "X"),
+    y = "mean_r2",
+    y_se = "mcse_mean_r2",
+    color_var = "ml_method",
+    group_var = "ml_method_id",
+    palette = pal_ml,
+    y_label = "Mean OOF R²",
+    ref_df = theory_df,
+    ref_y = "true_r2_x"
+  )
+
+  plot_r2_y <- make_line_plot(
+    data = r2_df %>% dplyr::filter(target == "Y"),
+    y = "mean_r2",
+    y_se = "mcse_mean_r2",
+    color_var = "ml_method",
+    group_var = "ml_method_id",
+    palette = pal_ml,
+    y_label = "Mean OOF R²",
+    ref_df = theory_df,
+    ref_y = "true_r2_y"
+  )
+
+  # ============================================================================
+  # 12B. TRUE-DELTA PLOT
+  # ============================================================================
+  # This plot is based only on the stored data-generating deltas.
+  #
+  # Facets:
+  #   one facet for each outcome ("x" and "y", if both are present)
+  #
+  # Lines:
+  #   one line per confounder
+  #
+  # In constant scenarios this will show flat lines, which is often exactly what
+  # you want to verify visually.
+
+  if (nrow(true_delta_df) > 0) {
+    plot_true_delta <- ggplot2::ggplot(
+      true_delta_df,
+      ggplot2::aes(
+        x = T,
+        y = delta,
+        color = confounder,
+        group = confounder
+      )
+    ) +
+      ggplot2::geom_line(linewidth = 0.9) +
+      ggplot2::geom_point(size = 2) +
+      ggplot2::facet_wrap(~ outcome, nrow = 1, scales = "fixed") +
+      ggplot2::scale_x_continuous(breaks = sort(unique(true_delta_df$T))) +
+      ggplot2::labs(
+        x = "Occasion",
+        y = "True delta",
+        color = NULL
+      ) +
+      ggplot2::theme_classic(base_size = 13) +
+      ggplot2::theme(
+        strip.text = ggplot2::element_text(size = 12),
+        axis.title = ggplot2::element_text(size = 13),
+        axis.text = ggplot2::element_text(size = 12),
+        legend.position = "bottom",
+        legend.text = ggplot2::element_text(size = 11)
+      )
+  } else {
+    plot_true_delta <- NULL
+  }
+
+  # ============================================================================
+  # 13. FLAG BAR PLOTS
+  # ============================================================================
+  # Ordering is chosen for quick visual diagnosis.
+  #
+  # flag0:
+  #   lowest proportion of proper runs on top
+  #
+  # flag1 / flag2:
+  #   highest issue proportion on top
+
+  plot_flag0 <- make_flag_bar_plot(
+    data = flag0_df,
+    x = "prop_flag0",
+    x_label = "Proper runs",
+    decreasing = FALSE,
+    palette = pal_method
+  )
+
+  plot_flag1 <- make_flag_bar_plot(
+    data = flag1_df,
+    x = "prop_flag1",
+    x_label = "Non-converged runs",
+    decreasing = TRUE,
+    palette = pal_method
+  )
+
+  plot_flag2 <- make_flag_bar_plot(
+    data = flag2_df,
+    x = "prop_flag2",
+    x_label = "Improper runs",
+    decreasing = TRUE,
+    palette = pal_method
+  )
+
+  # ============================================================================
+  # 14. IMPROPER-REASON PLOT
+  # ============================================================================
+  # Keep the top improper reasons per method and facet by method.
+
+  improper_reason_plot_df <- improper_reason_top_df %>%
+    dplyr::mutate(
+      reason_plot = reorder_within_base(
+        x = improper_reason,
+        by = prop_reason,
+        within = method
+      )
+    )
+
+  plot_improper_reasons <- ggplot2::ggplot(
+    improper_reason_plot_df,
+    ggplot2::aes(
+      x = prop_reason,
+      y = reason_plot,
+      fill = method
+    )
+  ) +
+    ggplot2::geom_col(show.legend = FALSE) +
+    ggplot2::facet_wrap(~ method, scales = "free_y") +
+    ggplot2::scale_y_discrete(labels = function(x) strip_reorder_suffix(x)) +
+    ggplot2::scale_x_continuous(labels = function(v) scales::percent(v, accuracy = 1)) +
+    ggplot2::labs(
+      x = "Share within improper runs",
+      y = NULL
+    ) +
+    ggplot2::theme_classic(base_size = 13) +
+    ggplot2::theme(
+      strip.text = ggplot2::element_text(size = 11),
+      axis.title = ggplot2::element_text(size = 13),
+      axis.text = ggplot2::element_text(size = 10)
+    ) +
+    ggplot2::scale_fill_manual(values = pal_method, drop = FALSE)
+
+  # ============================================================================
+  # 15. RETURN
+  # ============================================================================
+  # Everything is returned as a named list so you can extract exactly what you
+  # need without rerunning the function.
+
   list(
-    # --------------------------------------------------------------------------
+    # ------------------------------------------------------------------------
     # Summary data frames
-    # --------------------------------------------------------------------------
+    # ------------------------------------------------------------------------
     relbias_df = relbias_df,
     rmse_df = rmse_df,
     se_df = se_df,
     detect_df = detect_df,
     se_check = se_check,
+    mse_df = mse_df,
+    r2_df = r2_df,
+    theory_df = theory_df,
+    true_delta_df = true_delta_df,
     flag0_df = flag0_df,
     flag1_df = flag1_df,
     flag2_df = flag2_df,
-    mse_df = mse_df,
-    r2_df = r2_df,
+    improper_reason_df = improper_reason_df,
 
-    # --------------------------------------------------------------------------
-    # Classic combined plots
-    # --------------------------------------------------------------------------
-    plot_relbias = plot_relbias,
-    plot_rmse = plot_rmse,
-    plot_se = plot_se,
-    plot_power = plot_power,
-
-    # --------------------------------------------------------------------------
-    # Family-specific classic plots
-    # --------------------------------------------------------------------------
+    # ------------------------------------------------------------------------
+    # Family-specific SEM overview plots
+    # ------------------------------------------------------------------------
     plot_relbias_clpm = plot_relbias_clpm,
     plot_relbias_riclpm = plot_relbias_riclpm,
     plot_relbias_dpm = plot_relbias_dpm,
@@ -972,9 +1332,9 @@ plot_engine_results <- function(results_df,
     plot_power_riclpm = plot_power_riclpm,
     plot_power_dpm = plot_power_dpm,
 
-    # --------------------------------------------------------------------------
-    # Family-specific SE diagnostic plots
-    # --------------------------------------------------------------------------
+    # ------------------------------------------------------------------------
+    # Family-specific SE calibration plots
+    # ------------------------------------------------------------------------
     plot_se_ratio_clpm = plot_se_ratio_clpm,
     plot_se_ratio_riclpm = plot_se_ratio_riclpm,
     plot_se_ratio_dpm = plot_se_ratio_dpm,
@@ -982,10 +1342,25 @@ plot_engine_results <- function(results_df,
     plot_se_diff_riclpm = plot_se_diff_riclpm,
     plot_se_diff_dpm = plot_se_diff_dpm,
 
-    # --------------------------------------------------------------------------
-    # ML plots
-    # --------------------------------------------------------------------------
-    plot_mse = plot_mse,
-    plot_r2 = plot_r2
+    # ------------------------------------------------------------------------
+    # ML overview plots
+    # ------------------------------------------------------------------------
+    plot_mse_x = plot_mse_x,
+    plot_mse_y = plot_mse_y,
+    plot_r2_x = plot_r2_x,
+    plot_r2_y = plot_r2_y,
+
+    # ------------------------------------------------------------------------
+    # Truth-only delta plot
+    # ------------------------------------------------------------------------
+    plot_true_delta = plot_true_delta,
+
+    # ------------------------------------------------------------------------
+    # Flag / diagnostic plots
+    # ------------------------------------------------------------------------
+    plot_flag0 = plot_flag0,
+    plot_flag1 = plot_flag1,
+    plot_flag2 = plot_flag2,
+    plot_improper_reasons = plot_improper_reasons
   )
 }

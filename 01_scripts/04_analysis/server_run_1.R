@@ -169,7 +169,9 @@ print(out_s1_N10000$flag1_df, n = 100)
 print(out_s1_N10000$flag2_df, n = 100)
 
 # standard error checks
-out_s1_N10000$plot_se_ratio
+out_s1_N10000$plot_se_ratio_clpm
+out_s1_N10000$plot_se_ratio_riclpm
+out_s1_N10000$plot_se_ratio_dpm
 out_s1_N10000$plot_se_diff
 
 # ML diagnostics
