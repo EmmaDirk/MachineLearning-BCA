@@ -66,7 +66,7 @@ library(here)
 library(tidyverse)
 
 # source plotting function
-source(here("01_scripts", "02_development", "06_thesis_v3", "12_plotting.R"))
+source(here("01_scripts", "04_analysis", "plotting.R"))
 
 # ============================================================
 # load data
@@ -103,7 +103,7 @@ dat_N00150_s3 <- readRDS(here("02_data", "02_server_runs", "02_run", "test_s03_N
 dat_N00150_s4 <- readRDS(here("02_data", "02_server_runs", "02_run", "test_s04_N00150.rds"))
 dat_N00150_s5 <- readRDS(here("02_data", "02_server_runs", "02_run", "test_s05_N00150.rds"))
 dat_N00150_s6 <- readRDS(here("02_data", "02_server_runs", "02_run", "test_s06_N00150.rds"))
-
+str(dat_N00150_s1)
 # ============================================================
 # results
 # ============================================================
@@ -137,4 +137,998 @@ out_s6_N01000 <- plot_overview_suite(dat_N01000_s6)
 out_s6_N00300 <- plot_overview_suite(dat_N00300_s6)
 out_s6_N00150 <- plot_overview_suite(dat_N00150_s6)
 
-# 
+# ============================================================
+# output scenario 1
+# delta trajectory:
+out_s1_N00300$plot_true_delta
+# ============================================================
+
+# ------------------------ N = 10000 -------------------------
+
+# ml diagnostics
+out_s1_N10000$plot_r2_x
+out_s1_N10000$plot_r2_y
+out_s1_N10000$plot_mse_x
+out_s1_N10000$plot_mse_y
+
+# convergence / proper solution
+out_s1_N10000$plot_flag0
+out_s1_N10000$plot_flag1
+out_s1_N10000$plot_flag2
+out_s1_N10000$plot_improper_reasons
+
+# s.e. checks
+out_s1_N10000$plot_se_ratio_clpm
+out_s1_N10000$plot_se_ratio_riclpm
+out_s1_N10000$plot_se_ratio_dpm
+out_s1_N10000$plot_se_diff_clpm
+out_s1_N10000$plot_se_diff_riclpm
+out_s1_N10000$plot_se_diff_dpm
+
+# clpm results
+out_s1_N10000$plot_relbias_clpm
+out_s1_N10000$plot_se_clpm
+out_s1_N10000$plot_rmse_clpm
+out_s1_N10000$plot_power_clpm
+
+# ri-clpm results
+out_s1_N10000$plot_relbias_riclpm
+out_s1_N10000$plot_se_riclpm
+out_s1_N10000$plot_rmse_riclpm
+out_s1_N10000$plot_power_riclpm
+
+# dpm results
+out_s1_N10000$plot_relbias_dpm
+out_s1_N10000$plot_se_dpm
+out_s1_N10000$plot_rmse_dpm
+out_s1_N10000$plot_power_dpm
+
+# ------------------------ N = 1000 --------------------------
+
+# ml diagnostics
+out_s1_N01000$plot_r2_x
+out_s1_N01000$plot_r2_y
+out_s1_N01000$plot_mse_x
+out_s1_N01000$plot_mse_y
+
+# convergence / proper solution
+out_s1_N01000$plot_flag0
+out_s1_N01000$plot_flag1
+out_s1_N01000$plot_flag2
+out_s1_N01000$plot_improper_reasons
+
+# s.e. checks
+out_s1_N01000$plot_se_ratio_clpm
+out_s1_N01000$plot_se_ratio_riclpm
+out_s1_N01000$plot_se_ratio_dpm
+out_s1_N01000$plot_se_diff_clpm
+out_s1_N01000$plot_se_diff_riclpm
+out_s1_N01000$plot_se_diff_dpm
+
+# clpm results
+out_s1_N01000$plot_relbias_clpm
+out_s1_N01000$plot_se_clpm
+out_s1_N01000$plot_rmse_clpm
+out_s1_N01000$plot_power_clpm
+
+# ri-clpm results
+out_s1_N01000$plot_relbias_riclpm
+out_s1_N01000$plot_se_riclpm
+out_s1_N01000$plot_rmse_riclpm
+out_s1_N01000$plot_power_riclpm
+
+# dpm results
+out_s1_N01000$plot_relbias_dpm
+out_s1_N01000$plot_se_dpm
+out_s1_N01000$plot_rmse_dpm
+out_s1_N01000$plot_power_dpm
+
+# ------------------------ N = 300 ---------------------------
+
+# ml diagnostics
+out_s1_N00300$plot_r2_x
+out_s1_N00300$plot_r2_y
+out_s1_N00300$plot_mse_x
+out_s1_N00300$plot_mse_y
+
+# convergence / proper solution
+out_s1_N00300$plot_flag0
+out_s1_N00300$plot_flag1
+out_s1_N00300$plot_flag2
+out_s1_N00300$plot_improper_reasons
+
+# s.e. checks
+out_s1_N00300$plot_se_ratio_clpm
+out_s1_N00300$plot_se_ratio_riclpm
+out_s1_N00300$plot_se_ratio_dpm
+out_s1_N00300$plot_se_diff_clpm
+out_s1_N00300$plot_se_diff_riclpm
+out_s1_N00300$plot_se_diff_dpm
+
+# clpm results
+out_s1_N00300$plot_relbias_clpm
+out_s1_N00300$plot_se_clpm
+out_s1_N00300$plot_rmse_clpm
+out_s1_N00300$plot_power_clpm
+
+# ri-clpm results
+out_s1_N00300$plot_relbias_riclpm
+out_s1_N00300$plot_se_riclpm
+out_s1_N00300$plot_rmse_riclpm
+out_s1_N00300$plot_power_riclpm
+
+# dpm results
+out_s1_N00300$plot_relbias_dpm
+out_s1_N00300$plot_se_dpm
+out_s1_N00300$plot_rmse_dpm
+out_s1_N00300$plot_power_dpm
+
+# ------------------------ N = 150 ---------------------------
+
+# ml diagnostics
+out_s1_N00150$plot_r2_x
+out_s1_N00150$plot_r2_y
+out_s1_N00150$plot_mse_x
+out_s1_N00150$plot_mse_y
+
+# convergence / proper solution
+out_s1_N00150$plot_flag0
+out_s1_N00150$plot_flag1
+out_s1_N00150$plot_flag2
+out_s1_N00150$plot_improper_reasons
+
+# s.e. checks
+out_s1_N00150$plot_se_ratio_clpm
+out_s1_N00150$plot_se_ratio_riclpm
+out_s1_N00150$plot_se_ratio_dpm
+out_s1_N00150$plot_se_diff_clpm
+out_s1_N00150$plot_se_diff_riclpm
+out_s1_N00150$plot_se_diff_dpm
+
+# clpm results
+out_s1_N00150$plot_relbias_clpm
+out_s1_N00150$plot_se_clpm
+out_s1_N00150$plot_rmse_clpm
+out_s1_N00150$plot_power_clpm
+
+# ri-clpm results
+out_s1_N00150$plot_relbias_riclpm
+out_s1_N00150$plot_se_riclpm
+out_s1_N00150$plot_rmse_riclpm
+out_s1_N00150$plot_power_riclpm
+
+# dpm results
+out_s1_N00150$plot_relbias_dpm
+out_s1_N00150$plot_se_dpm
+out_s1_N00150$plot_rmse_dpm
+out_s1_N00150$plot_power_dpm
+
+# ============================================================
+# output scenario 2
+# delta trajectory:
+out_s2_N00300$plot_true_delta
+# ============================================================
+
+# ------------------------ N = 10000 -------------------------
+
+# ml diagnostics
+out_s2_N10000$plot_r2_x
+out_s2_N10000$plot_r2_y
+out_s2_N10000$plot_mse_x
+out_s2_N10000$plot_mse_y
+
+# convergence / proper solution
+out_s2_N10000$plot_flag0
+out_s2_N10000$plot_flag1
+out_s2_N10000$plot_flag2
+out_s2_N10000$plot_improper_reasons
+
+# s.e. checks
+out_s2_N10000$plot_se_ratio_clpm
+out_s2_N10000$plot_se_ratio_riclpm
+out_s2_N10000$plot_se_ratio_dpm
+out_s2_N10000$plot_se_diff_clpm
+out_s2_N10000$plot_se_diff_riclpm
+out_s2_N10000$plot_se_diff_dpm
+
+# clpm results
+out_s2_N10000$plot_relbias_clpm
+out_s2_N10000$plot_se_clpm
+out_s2_N10000$plot_rmse_clpm
+out_s2_N10000$plot_power_clpm
+
+# ri-clpm results
+out_s2_N10000$plot_relbias_riclpm
+out_s2_N10000$plot_se_riclpm
+out_s2_N10000$plot_rmse_riclpm
+out_s2_N10000$plot_power_riclpm
+
+# dpm results
+out_s2_N10000$plot_relbias_dpm
+out_s2_N10000$plot_se_dpm
+out_s2_N10000$plot_rmse_dpm
+out_s2_N10000$plot_power_dpm
+
+# ------------------------ N = 1000 --------------------------
+
+# ml diagnostics
+out_s2_N01000$plot_r2_x
+out_s2_N01000$plot_r2_y
+out_s2_N01000$plot_mse_x
+out_s2_N01000$plot_mse_y
+
+# convergence / proper solution
+out_s2_N01000$plot_flag0
+out_s2_N01000$plot_flag1
+out_s2_N01000$plot_flag2
+out_s2_N01000$plot_improper_reasons
+
+# s.e. checks
+out_s2_N01000$plot_se_ratio_clpm
+out_s2_N01000$plot_se_ratio_riclpm
+out_s2_N01000$plot_se_ratio_dpm
+out_s2_N01000$plot_se_diff_clpm
+out_s2_N01000$plot_se_diff_riclpm
+out_s2_N01000$plot_se_diff_dpm
+
+# clpm results
+out_s2_N01000$plot_relbias_clpm
+out_s2_N01000$plot_se_clpm
+out_s2_N01000$plot_rmse_clpm
+out_s2_N01000$plot_power_clpm
+
+# ri-clpm results
+out_s2_N01000$plot_relbias_riclpm
+out_s2_N01000$plot_se_riclpm
+out_s2_N01000$plot_rmse_riclpm
+out_s2_N01000$plot_power_riclpm
+
+# dpm results
+out_s2_N01000$plot_relbias_dpm
+out_s2_N01000$plot_se_dpm
+out_s2_N01000$plot_rmse_dpm
+out_s2_N01000$plot_power_dpm
+
+# ------------------------ N = 300 ---------------------------
+
+# ml diagnostics
+out_s2_N00300$plot_r2_x
+out_s2_N00300$plot_r2_y
+out_s2_N00300$plot_mse_x
+out_s2_N00300$plot_mse_y
+
+# convergence / proper solution
+out_s2_N00300$plot_flag0
+out_s2_N00300$plot_flag1
+out_s2_N00300$plot_flag2
+out_s2_N00300$plot_improper_reasons
+
+# s.e. checks
+out_s2_N00300$plot_se_ratio_clpm
+out_s2_N00300$plot_se_ratio_riclpm
+out_s2_N00300$plot_se_ratio_dpm
+out_s2_N00300$plot_se_diff_clpm
+out_s2_N00300$plot_se_diff_riclpm
+out_s2_N00300$plot_se_diff_dpm
+
+# clpm results
+out_s2_N00300$plot_relbias_clpm
+out_s2_N00300$plot_se_clpm
+out_s2_N00300$plot_rmse_clpm
+out_s2_N00300$plot_power_clpm
+
+# ri-clpm results
+out_s2_N00300$plot_relbias_riclpm
+out_s2_N00300$plot_se_riclpm
+out_s2_N00300$plot_rmse_riclpm
+out_s2_N00300$plot_power_riclpm
+
+# dpm results
+out_s2_N00300$plot_relbias_dpm
+out_s2_N00300$plot_se_dpm
+out_s2_N00300$plot_rmse_dpm
+out_s2_N00300$plot_power_dpm
+
+# ------------------------ N = 150 ---------------------------
+
+# ml diagnostics
+out_s2_N00150$plot_r2_x
+out_s2_N00150$plot_r2_y
+out_s2_N00150$plot_mse_x
+out_s2_N00150$plot_mse_y
+
+# convergence / proper solution
+out_s2_N00150$plot_flag0
+out_s2_N00150$plot_flag1
+out_s2_N00150$plot_flag2
+out_s2_N00150$plot_improper_reasons
+
+# s.e. checks
+out_s2_N00150$plot_se_ratio_clpm
+out_s2_N00150$plot_se_ratio_riclpm
+out_s2_N00150$plot_se_ratio_dpm
+out_s2_N00150$plot_se_diff_clpm
+out_s2_N00150$plot_se_diff_riclpm
+out_s2_N00150$plot_se_diff_dpm
+
+# clpm results
+out_s2_N00150$plot_relbias_clpm
+out_s2_N00150$plot_se_clpm
+out_s2_N00150$plot_rmse_clpm
+out_s2_N00150$plot_power_clpm
+
+# ri-clpm results
+out_s2_N00150$plot_relbias_riclpm
+out_s2_N00150$plot_se_riclpm
+out_s2_N00150$plot_rmse_riclpm
+out_s2_N00150$plot_power_riclpm
+
+# dpm results
+out_s2_N00150$plot_relbias_dpm
+out_s2_N00150$plot_se_dpm
+out_s2_N00150$plot_rmse_dpm
+out_s2_N00150$plot_power_dpm
+
+# ============================================================
+# output scenario 3
+# delta trajectory:
+out_s3_N00300$plot_true_delta
+# ============================================================
+
+# ------------------------ N = 10000 -------------------------
+
+# ml diagnostics
+out_s3_N10000$plot_r2_x
+out_s3_N10000$plot_r2_y
+out_s3_N10000$plot_mse_x
+out_s3_N10000$plot_mse_y
+
+# convergence / proper solution
+out_s3_N10000$plot_flag0
+out_s3_N10000$plot_flag1
+out_s3_N10000$plot_flag2
+out_s3_N10000$plot_improper_reasons
+
+# s.e. checks
+out_s3_N10000$plot_se_ratio_clpm
+out_s3_N10000$plot_se_ratio_riclpm
+out_s3_N10000$plot_se_ratio_dpm
+out_s3_N10000$plot_se_diff_clpm
+out_s3_N10000$plot_se_diff_riclpm
+out_s3_N10000$plot_se_diff_dpm
+
+# clpm results
+out_s3_N10000$plot_relbias_clpm
+out_s3_N10000$plot_se_clpm
+out_s3_N10000$plot_rmse_clpm
+out_s3_N10000$plot_power_clpm
+
+# ri-clpm results
+out_s3_N10000$plot_relbias_riclpm
+out_s3_N10000$plot_se_riclpm
+out_s3_N10000$plot_rmse_riclpm
+out_s3_N10000$plot_power_riclpm
+
+# dpm results
+out_s3_N10000$plot_relbias_dpm
+out_s3_N10000$plot_se_dpm
+out_s3_N10000$plot_rmse_dpm
+out_s3_N10000$plot_power_dpm
+
+# ------------------------ N = 1000 --------------------------
+
+# ml diagnostics
+out_s3_N01000$plot_r2_x
+out_s3_N01000$plot_r2_y
+out_s3_N01000$plot_mse_x
+out_s3_N01000$plot_mse_y
+
+# convergence / proper solution
+out_s3_N01000$plot_flag0
+out_s3_N01000$plot_flag1
+out_s3_N01000$plot_flag2
+out_s3_N01000$plot_improper_reasons
+
+# s.e. checks
+out_s3_N01000$plot_se_ratio_clpm
+out_s3_N01000$plot_se_ratio_riclpm
+out_s3_N01000$plot_se_ratio_dpm
+out_s3_N01000$plot_se_diff_clpm
+out_s3_N01000$plot_se_diff_riclpm
+out_s3_N01000$plot_se_diff_dpm
+
+# clpm results
+out_s3_N01000$plot_relbias_clpm
+out_s3_N01000$plot_se_clpm
+out_s3_N01000$plot_rmse_clpm
+out_s3_N01000$plot_power_clpm
+
+# ri-clpm results
+out_s3_N01000$plot_relbias_riclpm
+out_s3_N01000$plot_se_riclpm
+out_s3_N01000$plot_rmse_riclpm
+out_s3_N01000$plot_power_riclpm
+
+# dpm results
+out_s3_N01000$plot_relbias_dpm
+out_s3_N01000$plot_se_dpm
+out_s3_N01000$plot_rmse_dpm
+out_s3_N01000$plot_power_dpm
+
+# ------------------------ N = 300 ---------------------------
+
+# ml diagnostics
+out_s3_N00300$plot_r2_x
+out_s3_N00300$plot_r2_y
+out_s3_N00300$plot_mse_x
+out_s3_N00300$plot_mse_y
+
+# convergence / proper solution
+out_s3_N00300$plot_flag0
+out_s3_N00300$plot_flag1
+out_s3_N00300$plot_flag2
+out_s3_N00300$plot_improper_reasons
+
+# s.e. checks
+out_s3_N00300$plot_se_ratio_clpm
+out_s3_N00300$plot_se_ratio_riclpm
+out_s3_N00300$plot_se_ratio_dpm
+out_s3_N00300$plot_se_diff_clpm
+out_s3_N00300$plot_se_diff_riclpm
+out_s3_N00300$plot_se_diff_dpm
+
+# clpm results
+out_s3_N00300$plot_relbias_clpm
+out_s3_N00300$plot_se_clpm
+out_s3_N00300$plot_rmse_clpm
+out_s3_N00300$plot_power_clpm
+
+# ri-clpm results
+out_s3_N00300$plot_relbias_riclpm
+out_s3_N00300$plot_se_riclpm
+out_s3_N00300$plot_rmse_riclpm
+out_s3_N00300$plot_power_riclpm
+
+# dpm results
+out_s3_N00300$plot_relbias_dpm
+out_s3_N00300$plot_se_dpm
+out_s3_N00300$plot_rmse_dpm
+out_s3_N00300$plot_power_dpm
+
+# ------------------------ N = 150 ---------------------------
+
+# ml diagnostics
+out_s3_N00150$plot_r2_x
+out_s3_N00150$plot_r2_y
+out_s3_N00150$plot_mse_x
+out_s3_N00150$plot_mse_y
+
+# convergence / proper solution
+out_s3_N00150$plot_flag0
+out_s3_N00150$plot_flag1
+out_s3_N00150$plot_flag2
+out_s3_N00150$plot_improper_reasons
+
+# s.e. checks
+out_s3_N00150$plot_se_ratio_clpm
+out_s3_N00150$plot_se_ratio_riclpm
+out_s3_N00150$plot_se_ratio_dpm
+out_s3_N00150$plot_se_diff_clpm
+out_s3_N00150$plot_se_diff_riclpm
+out_s3_N00150$plot_se_diff_dpm
+
+# clpm results
+out_s3_N00150$plot_relbias_clpm
+out_s3_N00150$plot_se_clpm
+out_s3_N00150$plot_rmse_clpm
+out_s3_N00150$plot_power_clpm
+
+# ri-clpm results
+out_s3_N00150$plot_relbias_riclpm
+out_s3_N00150$plot_se_riclpm
+out_s3_N00150$plot_rmse_riclpm
+out_s3_N00150$plot_power_riclpm
+
+# dpm results
+out_s3_N00150$plot_relbias_dpm
+out_s3_N00150$plot_se_dpm
+out_s3_N00150$plot_rmse_dpm
+out_s3_N00150$plot_power_dpm
+
+# ============================================================
+# output scenario 4
+# delta trajectory:
+out_s4_N00300$plot_true_delta
+# ============================================================
+
+# ------------------------ N = 10000 -------------------------
+
+# ml diagnostics
+out_s4_N10000$plot_r2_x
+out_s4_N10000$plot_r2_y
+out_s4_N10000$plot_mse_x
+out_s4_N10000$plot_mse_y
+
+# convergence / proper solution
+out_s4_N10000$plot_flag0
+out_s4_N10000$plot_flag1
+out_s4_N10000$plot_flag2
+out_s4_N10000$plot_improper_reasons
+
+# s.e. checks
+out_s4_N10000$plot_se_ratio_clpm
+out_s4_N10000$plot_se_ratio_riclpm
+out_s4_N10000$plot_se_ratio_dpm
+out_s4_N10000$plot_se_diff_clpm
+out_s4_N10000$plot_se_diff_riclpm
+out_s4_N10000$plot_se_diff_dpm
+
+# clpm results
+out_s4_N10000$plot_relbias_clpm
+out_s4_N10000$plot_se_clpm
+out_s4_N10000$plot_rmse_clpm
+out_s4_N10000$plot_power_clpm
+
+# ri-clpm results
+out_s4_N10000$plot_relbias_riclpm
+out_s4_N10000$plot_se_riclpm
+out_s4_N10000$plot_rmse_riclpm
+out_s4_N10000$plot_power_riclpm
+
+# dpm results
+out_s4_N10000$plot_relbias_dpm
+out_s4_N10000$plot_se_dpm
+out_s4_N10000$plot_rmse_dpm
+out_s4_N10000$plot_power_dpm
+
+# ------------------------ N = 1000 --------------------------
+
+# ml diagnostics
+out_s4_N01000$plot_r2_x
+out_s4_N01000$plot_r2_y
+out_s4_N01000$plot_mse_x
+out_s4_N01000$plot_mse_y
+
+# convergence / proper solution
+out_s4_N01000$plot_flag0
+out_s4_N01000$plot_flag1
+out_s4_N01000$plot_flag2
+out_s4_N01000$plot_improper_reasons
+
+# s.e. checks
+out_s4_N01000$plot_se_ratio_clpm
+out_s4_N01000$plot_se_ratio_riclpm
+out_s4_N01000$plot_se_ratio_dpm
+out_s4_N01000$plot_se_diff_clpm
+out_s4_N01000$plot_se_diff_riclpm
+out_s4_N01000$plot_se_diff_dpm
+
+# clpm results
+out_s4_N01000$plot_relbias_clpm
+out_s4_N01000$plot_se_clpm
+out_s4_N01000$plot_rmse_clpm
+out_s4_N01000$plot_power_clpm
+
+# ri-clpm results
+out_s4_N01000$plot_relbias_riclpm
+out_s4_N01000$plot_se_riclpm
+out_s4_N01000$plot_rmse_riclpm
+out_s4_N01000$plot_power_riclpm
+
+# dpm results
+out_s4_N01000$plot_relbias_dpm
+out_s4_N01000$plot_se_dpm
+out_s4_N01000$plot_rmse_dpm
+out_s4_N01000$plot_power_dpm
+
+# ------------------------ N = 300 ---------------------------
+
+# ml diagnostics
+out_s4_N00300$plot_r2_x
+out_s4_N00300$plot_r2_y
+out_s4_N00300$plot_mse_x
+out_s4_N00300$plot_mse_y
+
+# convergence / proper solution
+out_s4_N00300$plot_flag0
+out_s4_N00300$plot_flag1
+out_s4_N00300$plot_flag2
+out_s4_N00300$plot_improper_reasons
+
+# s.e. checks
+out_s4_N00300$plot_se_ratio_clpm
+out_s4_N00300$plot_se_ratio_riclpm
+out_s4_N00300$plot_se_ratio_dpm
+out_s4_N00300$plot_se_diff_clpm
+out_s4_N00300$plot_se_diff_riclpm
+out_s4_N00300$plot_se_diff_dpm
+
+# clpm results
+out_s4_N00300$plot_relbias_clpm
+out_s4_N00300$plot_se_clpm
+out_s4_N00300$plot_rmse_clpm
+out_s4_N00300$plot_power_clpm
+
+# ri-clpm results
+out_s4_N00300$plot_relbias_riclpm
+out_s4_N00300$plot_se_riclpm
+out_s4_N00300$plot_rmse_riclpm
+out_s4_N00300$plot_power_riclpm
+
+# dpm results
+out_s4_N00300$plot_relbias_dpm
+out_s4_N00300$plot_se_dpm
+out_s4_N00300$plot_rmse_dpm
+out_s4_N00300$plot_power_dpm
+
+# ------------------------ N = 150 ---------------------------
+
+# ml diagnostics
+out_s4_N00150$plot_r2_x
+out_s4_N00150$plot_r2_y
+out_s4_N00150$plot_mse_x
+out_s4_N00150$plot_mse_y
+
+# convergence / proper solution
+out_s4_N00150$plot_flag0
+out_s4_N00150$plot_flag1
+out_s4_N00150$plot_flag2
+out_s4_N00150$plot_improper_reasons
+
+# s.e. checks
+out_s4_N00150$plot_se_ratio_clpm
+out_s4_N00150$plot_se_ratio_riclpm
+out_s4_N00150$plot_se_ratio_dpm
+out_s4_N00150$plot_se_diff_clpm
+out_s4_N00150$plot_se_diff_riclpm
+out_s4_N00150$plot_se_diff_dpm
+
+# clpm results
+out_s4_N00150$plot_relbias_clpm
+out_s4_N00150$plot_se_clpm
+out_s4_N00150$plot_rmse_clpm
+out_s4_N00150$plot_power_clpm
+
+# ri-clpm results
+out_s4_N00150$plot_relbias_riclpm
+out_s4_N00150$plot_se_riclpm
+out_s4_N00150$plot_rmse_riclpm
+out_s4_N00150$plot_power_riclpm
+
+# dpm results
+out_s4_N00150$plot_relbias_dpm
+out_s4_N00150$plot_se_dpm
+out_s4_N00150$plot_rmse_dpm
+out_s4_N00150$plot_power_dpm
+
+# ============================================================
+# output scenario 5
+# delta trajectory:
+out_s5_N00300$plot_true_delta
+# ============================================================
+
+# ------------------------ N = 10000 -------------------------
+
+# ml diagnostics
+out_s5_N10000$plot_r2_x
+out_s5_N10000$plot_r2_y
+out_s5_N10000$plot_mse_x
+out_s5_N10000$plot_mse_y
+
+# convergence / proper solution
+out_s5_N10000$plot_flag0
+out_s5_N10000$plot_flag1
+out_s5_N10000$plot_flag2
+out_s5_N10000$plot_improper_reasons
+
+# s.e. checks
+out_s5_N10000$plot_se_ratio_clpm
+out_s5_N10000$plot_se_ratio_riclpm
+out_s5_N10000$plot_se_ratio_dpm
+out_s5_N10000$plot_se_diff_clpm
+out_s5_N10000$plot_se_diff_riclpm
+out_s5_N10000$plot_se_diff_dpm
+
+# clpm results
+out_s5_N10000$plot_relbias_clpm
+out_s5_N10000$plot_se_clpm
+out_s5_N10000$plot_rmse_clpm
+out_s5_N10000$plot_power_clpm
+
+# ri-clpm results
+out_s5_N10000$plot_relbias_riclpm
+out_s5_N10000$plot_se_riclpm
+out_s5_N10000$plot_rmse_riclpm
+out_s5_N10000$plot_power_riclpm
+
+# dpm results
+out_s5_N10000$plot_relbias_dpm
+out_s5_N10000$plot_se_dpm
+out_s5_N10000$plot_rmse_dpm
+out_s5_N10000$plot_power_dpm
+
+# ------------------------ N = 1000 --------------------------
+
+# ml diagnostics
+out_s5_N01000$plot_r2_x
+out_s5_N01000$plot_r2_y
+out_s5_N01000$plot_mse_x
+out_s5_N01000$plot_mse_y
+
+# convergence / proper solution
+out_s5_N01000$plot_flag0
+out_s5_N01000$plot_flag1
+out_s5_N01000$plot_flag2
+out_s5_N01000$plot_improper_reasons
+
+# s.e. checks
+out_s5_N01000$plot_se_ratio_clpm
+out_s5_N01000$plot_se_ratio_riclpm
+out_s5_N01000$plot_se_ratio_dpm
+out_s5_N01000$plot_se_diff_clpm
+out_s5_N01000$plot_se_diff_riclpm
+out_s5_N01000$plot_se_diff_dpm
+
+# clpm results
+out_s5_N01000$plot_relbias_clpm
+out_s5_N01000$plot_se_clpm
+out_s5_N01000$plot_rmse_clpm
+out_s5_N01000$plot_power_clpm
+
+# ri-clpm results
+out_s5_N01000$plot_relbias_riclpm
+out_s5_N01000$plot_se_riclpm
+out_s5_N01000$plot_rmse_riclpm
+out_s5_N01000$plot_power_riclpm
+
+# dpm results
+out_s5_N01000$plot_relbias_dpm
+out_s5_N01000$plot_se_dpm
+out_s5_N01000$plot_rmse_dpm
+out_s5_N01000$plot_power_dpm
+
+# ------------------------ N = 300 ---------------------------
+
+# ml diagnostics
+out_s5_N00300$plot_r2_x
+out_s5_N00300$plot_r2_y
+out_s5_N00300$plot_mse_x
+out_s5_N00300$plot_mse_y
+
+# convergence / proper solution
+out_s5_N00300$plot_flag0
+out_s5_N00300$plot_flag1
+out_s5_N00300$plot_flag2
+out_s5_N00300$plot_improper_reasons
+
+# s.e. checks
+out_s5_N00300$plot_se_ratio_clpm
+out_s5_N00300$plot_se_ratio_riclpm
+out_s5_N00300$plot_se_ratio_dpm
+out_s5_N00300$plot_se_diff_clpm
+out_s5_N00300$plot_se_diff_riclpm
+out_s5_N00300$plot_se_diff_dpm
+
+# clpm results
+out_s5_N00300$plot_relbias_clpm
+out_s5_N00300$plot_se_clpm
+out_s5_N00300$plot_rmse_clpm
+out_s5_N00300$plot_power_clpm
+
+# ri-clpm results
+out_s5_N00300$plot_relbias_riclpm
+out_s5_N00300$plot_se_riclpm
+out_s5_N00300$plot_rmse_riclpm
+out_s5_N00300$plot_power_riclpm
+
+# dpm results
+out_s5_N00300$plot_relbias_dpm
+out_s5_N00300$plot_se_dpm
+out_s5_N00300$plot_rmse_dpm
+out_s5_N00300$plot_power_dpm
+
+# ------------------------ N = 150 ---------------------------
+
+# ml diagnostics
+out_s5_N00150$plot_r2_x
+out_s5_N00150$plot_r2_y
+out_s5_N00150$plot_mse_x
+out_s5_N00150$plot_mse_y
+
+# convergence / proper solution
+out_s5_N00150$plot_flag0
+out_s5_N00150$plot_flag1
+out_s5_N00150$plot_flag2
+out_s5_N00150$plot_improper_reasons
+
+# s.e. checks
+out_s5_N00150$plot_se_ratio_clpm
+out_s5_N00150$plot_se_ratio_riclpm
+out_s5_N00150$plot_se_ratio_dpm
+out_s5_N00150$plot_se_diff_clpm
+out_s5_N00150$plot_se_diff_riclpm
+out_s5_N00150$plot_se_diff_dpm
+
+# clpm results
+out_s5_N00150$plot_relbias_clpm
+out_s5_N00150$plot_se_clpm
+out_s5_N00150$plot_rmse_clpm
+out_s5_N00150$plot_power_clpm
+
+# ri-clpm results
+out_s5_N00150$plot_relbias_riclpm
+out_s5_N00150$plot_se_riclpm
+out_s5_N00150$plot_rmse_riclpm
+out_s5_N00150$plot_power_riclpm
+
+# dpm results
+out_s5_N00150$plot_relbias_dpm
+out_s5_N00150$plot_se_dpm
+out_s5_N00150$plot_rmse_dpm
+out_s5_N00150$plot_power_dpm
+
+# ============================================================
+# output scenario 6
+# delta trajectory:
+out_s6_N00300$plot_true_delta
+# ============================================================
+
+# ------------------------ N = 10000 -------------------------
+
+# ml diagnostics
+out_s6_N10000$plot_r2_x
+out_s6_N10000$plot_r2_y
+out_s6_N10000$plot_mse_x
+out_s6_N10000$plot_mse_y
+
+# convergence / proper solution
+out_s6_N10000$plot_flag0
+out_s6_N10000$plot_flag1
+out_s6_N10000$plot_flag2
+out_s6_N10000$plot_improper_reasons
+
+# s.e. checks
+out_s6_N10000$plot_se_ratio_clpm
+out_s6_N10000$plot_se_ratio_riclpm
+out_s6_N10000$plot_se_ratio_dpm
+out_s6_N10000$plot_se_diff_clpm
+out_s6_N10000$plot_se_diff_riclpm
+out_s6_N10000$plot_se_diff_dpm
+
+# clpm results
+out_s6_N10000$plot_relbias_clpm
+out_s6_N10000$plot_se_clpm
+out_s6_N10000$plot_rmse_clpm
+out_s6_N10000$plot_power_clpm
+
+# ri-clpm results
+out_s6_N10000$plot_relbias_riclpm
+out_s6_N10000$plot_se_riclpm
+out_s6_N10000$plot_rmse_riclpm
+out_s6_N10000$plot_power_riclpm
+
+# dpm results
+out_s6_N10000$plot_relbias_dpm
+out_s6_N10000$plot_se_dpm
+out_s6_N10000$plot_rmse_dpm
+out_s6_N10000$plot_power_dpm
+
+# ------------------------ N = 1000 --------------------------
+
+# ml diagnostics
+out_s6_N01000$plot_r2_x
+out_s6_N01000$plot_r2_y
+out_s6_N01000$plot_mse_x
+out_s6_N01000$plot_mse_y
+
+# convergence / proper solution
+out_s6_N01000$plot_flag0
+out_s6_N01000$plot_flag1
+out_s6_N01000$plot_flag2
+out_s6_N01000$plot_improper_reasons
+
+# s.e. checks
+out_s6_N01000$plot_se_ratio_clpm
+out_s6_N01000$plot_se_ratio_riclpm
+out_s6_N01000$plot_se_ratio_dpm
+out_s6_N01000$plot_se_diff_clpm
+out_s6_N01000$plot_se_diff_riclpm
+out_s6_N01000$plot_se_diff_dpm
+
+# clpm results
+out_s6_N01000$plot_relbias_clpm
+out_s6_N01000$plot_se_clpm
+out_s6_N01000$plot_rmse_clpm
+out_s6_N01000$plot_power_clpm
+
+# ri-clpm results
+out_s6_N01000$plot_relbias_riclpm
+out_s6_N01000$plot_se_riclpm
+out_s6_N01000$plot_rmse_riclpm
+out_s6_N01000$plot_power_riclpm
+
+# dpm results
+out_s6_N01000$plot_relbias_dpm
+out_s6_N01000$plot_se_dpm
+out_s6_N01000$plot_rmse_dpm
+out_s6_N01000$plot_power_dpm
+
+# ------------------------ N = 300 ---------------------------
+
+# ml diagnostics
+out_s6_N00300$plot_r2_x
+out_s6_N00300$plot_r2_y
+out_s6_N00300$plot_mse_x
+out_s6_N00300$plot_mse_y
+
+# convergence / proper solution
+out_s6_N00300$plot_flag0
+out_s6_N00300$plot_flag1
+out_s6_N00300$plot_flag2
+out_s6_N00300$plot_improper_reasons
+
+# s.e. checks
+out_s6_N00300$plot_se_ratio_clpm
+out_s6_N00300$plot_se_ratio_riclpm
+out_s6_N00300$plot_se_ratio_dpm
+out_s6_N00300$plot_se_diff_clpm
+out_s6_N00300$plot_se_diff_riclpm
+out_s6_N00300$plot_se_diff_dpm
+
+# clpm results
+out_s6_N00300$plot_relbias_clpm
+out_s6_N00300$plot_se_clpm
+out_s6_N00300$plot_rmse_clpm
+out_s6_N00300$plot_power_clpm
+
+# ri-clpm results
+out_s6_N00300$plot_relbias_riclpm
+out_s6_N00300$plot_se_riclpm
+out_s6_N00300$plot_rmse_riclpm
+out_s6_N00300$plot_power_riclpm
+
+# dpm results
+out_s6_N00300$plot_relbias_dpm
+out_s6_N00300$plot_se_dpm
+out_s6_N00300$plot_rmse_dpm
+out_s6_N00300$plot_power_dpm
+
+# ------------------------ N = 150 ---------------------------
+
+# ml diagnostics
+out_s6_N00150$plot_r2_x
+out_s6_N00150$plot_r2_y
+out_s6_N00150$plot_mse_x
+out_s6_N00150$plot_mse_y
+
+# convergence / proper solution
+out_s6_N00150$plot_flag0
+out_s6_N00150$plot_flag1
+out_s6_N00150$plot_flag2
+out_s6_N00150$plot_improper_reasons
+
+# s.e. checks
+out_s6_N00150$plot_se_ratio_clpm
+out_s6_N00150$plot_se_ratio_riclpm
+out_s6_N00150$plot_se_ratio_dpm
+out_s6_N00150$plot_se_diff_clpm
+out_s6_N00150$plot_se_diff_riclpm
+out_s6_N00150$plot_se_diff_dpm
+
+# clpm results
+out_s6_N00150$plot_relbias_clpm
+out_s6_N00150$plot_se_clpm
+out_s6_N00150$plot_rmse_clpm
+out_s6_N00150$plot_power_clpm
+
+# ri-clpm results
+out_s6_N00150$plot_relbias_riclpm
+out_s6_N00150$plot_se_riclpm
+out_s6_N00150$plot_rmse_riclpm
+out_s6_N00150$plot_power_riclpm
+
+# dpm results
+out_s6_N00150$plot_relbias_dpm
+out_s6_N00150$plot_se_dpm
+out_s6_N00150$plot_rmse_dpm
+out_s6_N00150$plot_power_dpm
