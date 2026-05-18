@@ -613,11 +613,13 @@ plot_performance_effects_3x4 <- function(
     type1_metric_labels = c(
       ARXY = "Type-I error Y to X"
     ),
-    n_order = c(2000, 1000, 300),
+    # Changed for plot facets:
+    # columns now appear as N = 300, N = 1000, N = 2000.
+    n_order = c(300, 1000, 2000),
     n_labels = c(
-      `2000` = "N = 2000",
+      `300`  = "N = 300",
       `1000` = "N = 1000",
-      `300`  = "N = 300"
+      `2000` = "N = 2000"
     ),
     occasions = 2:5,
     alpha = 0.05,
@@ -710,7 +712,7 @@ plot_performance_effects_3x4 <- function(
     bias_label <- if (uses_raw_bias) {
       "Bias"
     } else {
-      "Relative bias"
+      "Relative Bias"
     }
 
     extra_type1_effect <- NA_character_
@@ -1027,7 +1029,7 @@ plot_performance_effects_3x4 <- function(
 
 
 # ============================================================
-# improper fit proportions and latex table
+# improper fit proportions and combined latex table
 # ============================================================
 
 make_improper_fit_table <- function(
@@ -1076,21 +1078,32 @@ format_latex_number <- function(x) {
   sprintf("%.2f", x)
 }
 
-make_latex_improper_table <- function(
-    improper_df,
-    scenario_number,
-    label_suffix,
+make_latex_improper_table_all_scenarios <- function(
+    improper_list,
+    scenario_numbers = names(improper_list),
     n_order = c(2000, 1000, 300),
-    method_cols = default_method_order
+    method_cols = default_method_order,
+    caption = "Fraction of Improper Solutions by Sample Size, Method, and Scenario",
+    label = "tab:improper-all-scenarios"
 ) {
-  wide_df <- improper_df %>%
+  if (is.null(scenario_numbers) || any(scenario_numbers == "")) {
+    scenario_numbers <- seq_along(improper_list)
+  }
+
+  combined_df <- purrr::map2_dfr(
+    improper_list,
+    scenario_numbers,
+    ~ .x %>%
+      dplyr::mutate(Scenario = as.character(.y))
+  )
+
+  wide_df <- combined_df %>%
     dplyr::mutate(method = as.character(method)) %>%
-    dplyr::select(N, method, improper_frac) %>%
+    dplyr::select(Scenario, N, method, improper_frac) %>%
     tidyr::pivot_wider(
       names_from = method,
       values_from = improper_frac
-    ) %>%
-    dplyr::arrange(match(N, n_order))
+    )
 
   missing_methods <- setdiff(method_cols, names(wide_df))
   if (length(missing_methods) > 0) {
@@ -1098,7 +1111,12 @@ make_latex_improper_table <- function(
   }
 
   table_df <- wide_df %>%
-    dplyr::select(N, dplyr::all_of(method_cols)) %>%
+    dplyr::select(Scenario, N, dplyr::all_of(method_cols)) %>%
+    dplyr::mutate(
+      Scenario = factor(Scenario, levels = as.character(scenario_numbers)),
+      N = as.integer(N)
+    ) %>%
+    dplyr::arrange(Scenario, match(N, n_order)) %>%
     dplyr::mutate(
       dplyr::across(
         dplyr::all_of(method_cols),
@@ -1106,19 +1124,53 @@ make_latex_improper_table <- function(
       )
     )
 
-  knitr::kable(
-    table_df,
-    format = "latex",
-    booktabs = TRUE,
-    escape = FALSE,
-    align = c("l", rep("c", length(method_cols))),
-    col.names = c("$N$", method_cols),
-    caption = paste0(
-      "Fraction of Improper Solutions by Sample Size and Method: Scenario ",
-      scenario_number
-    ),
-    label = paste0("improper-", label_suffix)
+  lines <- c(
+    "\\begin{table}[htbp]",
+    "\\centering",
+    paste0("\\caption{", caption, "}"),
+    paste0("\\label{", label, "}"),
+    paste0("\\begin{tabular}{ll", paste(rep("c", length(method_cols)), collapse = ""), "}"),
+    "\\toprule",
+    paste0("Scenario & $N$ & ", paste(method_cols, collapse = " & "), "\\\\"),
+    "\\midrule"
   )
+
+  scenario_levels <- as.character(scenario_numbers)
+
+  for (i in seq_along(scenario_levels)) {
+    this_scenario <- scenario_levels[i]
+
+    this_df <- table_df %>%
+      dplyr::filter(as.character(Scenario) == this_scenario) %>%
+      dplyr::arrange(match(N, n_order))
+
+    for (j in seq_len(nrow(this_df))) {
+      scenario_cell <- if (j == 1) this_scenario else " "
+      n_cell <- as.character(this_df$N[j])
+      value_cells <- unname(unlist(this_df[j, method_cols], use.names = FALSE))
+
+      lines <- c(
+        lines,
+        paste0(
+          paste(c(scenario_cell, n_cell, value_cells), collapse = " & "),
+          "\\\\"
+        )
+      )
+    }
+
+    if (i < length(scenario_levels)) {
+      lines <- c(lines, "\\addlinespace")
+    }
+  }
+
+  lines <- c(
+    lines,
+    "\\bottomrule",
+    "\\end{tabular}",
+    "\\end{table}"
+  )
+
+  paste(lines, collapse = "\n")
 }
 
 
@@ -1181,7 +1233,7 @@ ggplot2::ggsave(
 
 
 # ============================================================
-# export latex table only
+# export one combined latex table only
 # ============================================================
 
 improper_s1 <- make_improper_fit_table(dat_s1)
@@ -1189,18 +1241,17 @@ improper_s2 <- make_improper_fit_table(dat_s2)
 improper_s3 <- make_improper_fit_table(dat_s3)
 improper_s4 <- make_improper_fit_table(dat_s4)
 
-latex_tables <- c(
-  as.character(make_latex_improper_table(improper_s1, scenario_number = 1, label_suffix = "s1")),
-  "",
-  as.character(make_latex_improper_table(improper_s2, scenario_number = 2, label_suffix = "s2")),
-  "",
-  as.character(make_latex_improper_table(improper_s3, scenario_number = 3, label_suffix = "s3")),
-  "",
-  as.character(make_latex_improper_table(improper_s4, scenario_number = 4, label_suffix = "s4"))
+latex_table_all_scenarios <- make_latex_improper_table_all_scenarios(
+  improper_list = list(
+    `1` = improper_s1,
+    `2` = improper_s2,
+    `3` = improper_s3,
+    `4` = improper_s4
+  )
 )
 
 writeLines(
-  latex_tables,
+  latex_table_all_scenarios,
   con = file.path(output_dir, "improper_fit_proportions.tex")
 )
 
