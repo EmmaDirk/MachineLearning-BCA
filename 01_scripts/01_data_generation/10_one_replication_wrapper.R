@@ -1,4 +1,4 @@
-# 10_one_replication_wrapper.R
+# =================================================================================================
 # This file executes one full replication for either:
 # - one user-supplied model specification, or
 # - a whole user-supplied set of model specifications
@@ -12,9 +12,12 @@
 #
 # The output data frame intentionally repeats study metadata across occasions.
 # This makes later row-binding across model runs much simpler.
-# -------------------------------------------------------------------------------------------------
+# =================================================================================================
 
-# compact codes used in the final results frame
+# ---- compact output codes ------------------------------------------------------------------------
+
+# Encode the SEM model as a compact code for the final results frame.
+
 encode_sem_model <- function(sem_model) {
 
   switch(
@@ -26,6 +29,8 @@ encode_sem_model <- function(sem_model) {
   )
 }
 
+
+# Encode the residualiser as a compact code for the final results frame.
 
 encode_residualizer <- function(residualizer) {
 
@@ -40,7 +45,10 @@ encode_residualizer <- function(residualizer) {
 }
 
 
-# collapse the exclusion vector into one merge-friendly string
+# ---- metadata helpers ----------------------------------------------------------------------------
+
+# Collapse the exclusion vector into one merge-friendly string.
+
 collapse_exclusion <- function(exclude) {
 
   if (is.null(exclude) || length(exclude) == 0) {
@@ -51,13 +59,15 @@ collapse_exclusion <- function(exclude) {
 }
 
 
-# compute the metadata that are actually operative in the fitted pipeline
+# Compute the SEM-side exclusion that is actually operative in the fitted pipeline.
+
 compute_effective_sem_exclusion <- function(residualizer, sem_model, sem_exclude) {
 
   residualizer <- match.arg(residualizer, c("none", "linear", "xgb", "enet"))
   sem_model <- match.arg(sem_model, c("clpm", "riclpm", "dpm"))
 
-  # after stage-1 residualisation, the SEM no longer receives observed confounders directly
+  # After stage-1 residualisation, the SEM no longer receives observed confounders directly.
+
   if (residualizer != "none") {
     return(NA_character_)
   }
@@ -66,12 +76,15 @@ compute_effective_sem_exclusion <- function(residualizer, sem_model, sem_exclude
 }
 
 
+# Compute the SEM-side confounder order that is actually operative in the fitted pipeline.
+
 compute_effective_sem_c_order <- function(residualizer, sem_model, sem_c_order) {
 
   residualizer <- match.arg(residualizer, c("none", "linear", "xgb", "enet"))
   sem_model <- match.arg(sem_model, c("clpm", "riclpm", "dpm"))
 
-  # after stage-1 residualisation, the SEM is fit without direct observed confounders
+  # After stage-1 residualisation, the SEM is fit without direct observed confounders.
+
   if (residualizer != "none") {
     return(0L)
   }
@@ -80,11 +93,14 @@ compute_effective_sem_c_order <- function(residualizer, sem_model, sem_c_order) 
 }
 
 
+# Compute the residualiser-side exclusion that is actually operative in the fitted pipeline.
+
 compute_effective_residualizer_exclusion <- function(residualizer, residualizer_exclude) {
 
   residualizer <- match.arg(residualizer, c("none", "linear", "xgb", "enet"))
 
-  # without stage-1 residualisation, residualiser-side exclusions are not operative
+  # Without stage-1 residualisation, residualiser-side exclusions are not operative.
+
   if (residualizer == "none") {
     return(NA_character_)
   }
@@ -93,11 +109,14 @@ compute_effective_residualizer_exclusion <- function(residualizer, residualizer_
 }
 
 
+# Compute the residualiser-side confounder order that is actually operative in the fitted pipeline.
+
 compute_effective_residualizer_c_order <- function(residualizer, residualizer_c_order) {
 
   residualizer <- match.arg(residualizer, c("none", "linear", "xgb", "enet"))
 
-  # without stage-1 residualisation, no residualiser-side confounder columns are used
+  # Without stage-1 residualisation, no residualiser-side confounder columns are used.
+
   if (residualizer == "none") {
     return(0L)
   }
@@ -106,7 +125,10 @@ compute_effective_residualizer_c_order <- function(residualizer, residualizer_c_
 }
 
 
-# build an empty T-row result frame for a failed model within a replication
+# ---- failed-model output -------------------------------------------------------------------------
+
+# Build an empty T-row result frame for a failed model within a replication.
+
 make_failed_replication_frame <- function(
     R,
     T,
@@ -124,15 +146,16 @@ make_failed_replication_frame <- function(
     flag = 1L
 ) {
 
-  # true lagged parameters are still known from Phi
+  # The true lagged parameters are still known from Phi.
+
   true_par <- extract_true_lagged_parameters(Phi = Phi, T = T)
 
-  # keep only the observed-wave true DGM quantities.
-  # These are wave-specific and identical across fitted models within the same
-  # replication because they are implied entirely by the DGM, not by the fitted model.
+  # Keep only the observed-wave true DGM quantities.
+
   true_r2_obs <- true_confounder_r2$observed_waves
 
-  # convert the main-analysis flag into one-hot proportions
+  # Convert the main-analysis flag into one-hot proportions.
+
   flag_props <- flag_to_props(flag)
 
   data.frame(
@@ -140,22 +163,18 @@ make_failed_replication_frame <- function(
     R = rep(as.integer(R), T),
     T = seq_len(T),
 
-    # analysis_flag retains the classification of the main fitted model itself
     analysis_flag = rep(as.integer(flag), T),
 
-    # these four columns always sum to 1
     flag0 = rep(as.numeric(flag_props$flag0), T),
     flag1 = rep(as.numeric(flag_props$flag1), T),
     flag2 = rep(as.numeric(flag_props$flag2), T),
     flag3 = rep(as.numeric(flag_props$flag3), T),
 
-    # diagnostic column for the main fit
     improper_reason = rep(NA_character_, T),
 
     model = rep(encode_sem_model(sem_model), T),
     residualizer = rep(encode_residualizer(residualizer), T),
 
-    # explicit layer-specific metadata
     sem_exclusion = rep(compute_effective_sem_exclusion(residualizer, sem_model, sem_exclude), T),
     sem_c_order = rep(compute_effective_sem_c_order(residualizer, sem_model, sem_c_order), T),
     residualizer_exclusion = rep(compute_effective_residualizer_exclusion(residualizer, residualizer_exclude), T),
@@ -165,23 +184,23 @@ make_failed_replication_frame <- function(
     bootstrap_B = rep(if (uses_bootstrap_se(residualizer)) as.integer(bootstrap_B) else 0L, T),
     bootstrap_prop_success = rep(NA_real_, T),
     BIC = rep(NA_real_, T),
+
     beta_x = true_par$beta_x,
     beta_y = true_par$beta_y,
     gamma_xy = true_par$gamma_xy,
     gamma_yx = true_par$gamma_yx,
+
     internal_wave = true_r2_obs$t_internal,
     true_r2_x = true_r2_obs$true_r2_x,
     true_r2_y = true_r2_obs$true_r2_y,
 
-    # store the direct true Delta_t coefficients as one list-column entry per wave.
-    # Each element is a named numeric vector produced upstream by
-    # compute_true_confounder_r2(). Because the DGM is shared across fitted models
-    # within one replication, this column is repeated identically across models.
     true_delta_t_vector = I(true_r2_obs$true_delta_t_vector),
+
     mse_x = rep(NA_real_, T),
     r2_x = rep(NA_real_, T),
     mse_y = rep(NA_real_, T),
     r2_y = rep(NA_real_, T),
+
     ARX = rep(NA_real_, T),
     se_ARX = rep(NA_real_, T),
     ARY = rep(NA_real_, T),
@@ -190,13 +209,17 @@ make_failed_replication_frame <- function(
     se_CXY = rep(NA_real_, T),
     CYX = rep(NA_real_, T),
     se_CYX = rep(NA_real_, T),
+
     bootstrap_issue_vector = I(rep(list(NA_character_), T)),
     stringsAsFactors = FALSE
   )
 }
 
 
-# collapse one fitted model into the final T-row output format
+# ---- fitted-model output -------------------------------------------------------------------------
+
+# Collapse one fitted model into the final T-row output format.
+
 build_model_result_frame <- function(
     R,
     T,
@@ -209,40 +232,41 @@ build_model_result_frame <- function(
     true_confounder_r2
 ) {
 
-  # classify the fit
+  # Classify the main SEM fit.
+
   analysis_flag <- classify_fit_flag(fit_out$fit)
 
-  # diagnose the main improper fit if applicable
+  # Diagnose the main improper fit when applicable.
+
   improper_reason <- if (analysis_flag %in% c(2L, 3L)) {
     diagnose_improper_fit(fit_out$fit)
   } else {
     NA_character_
   }
 
-  # extract model-based point estimates and standard errors
+  # Extract model-based point estimates and standard errors.
+
   lag <- extract_lagged_estimates(
     fit = fit_out$fit,
     T = T,
     model_type = spec$sem_model
   )
 
-  # standardize the main-run ML metrics to the final T-row output
+  # Standardise the main-run ML metrics to the final T-row output.
+
   ml_main <- standardize_ml_metric_frame(main_ml_metrics, T = T)
 
-  # default bootstrap outputs
+  # Initialise bootstrap outputs.
+
   bootstrap_prop_success <- NA_real_
   bootstrap_issue_vector <- NA_character_
 
-  # We do not store bootstrap summaries of the stage-1 OOF MSE / R^2 metrics
-  # anymore. The final saved output focuses on the main per-replication OOF
-  # point estimates, while Monte Carlo uncertainty is computed later across
-  # replications. Bootstrap is still retained here for SEM-path standard errors
-  # and bootstrap success-rate summaries.
+  # Default proportional flags are the one-hot encoding of the main fit.
 
-  # default proportional flags are the one-hot encoding of the main fit
   flag_props <- flag_to_props(analysis_flag)
 
-  # overwrite SEs and flag proportions when bootstrap output is available
+  # Overwrite SEs and flag proportions when bootstrap output is available.
+
   if (!is.null(bootstrap_out)) {
 
     lag$se_ARX <- bootstrap_out$ARX
@@ -259,15 +283,14 @@ build_model_result_frame <- function(
       flag2 = bootstrap_out$flag2,
       flag3 = bootstrap_out$flag3
     )
-
   }
 
-  # true lagged parameters implied by Phi
+  # Extract true lagged parameters implied by Phi.
+
   true_par <- extract_true_lagged_parameters(Phi = Phi, T = T)
 
-  # keep only the observed-wave true DGM quantities.
-  # This is the population benchmark implied by the DGM itself. It does not depend
-  # on the fitted model, only on Phi, Delta_list, Omega11, Sigma, and burn-in.
+  # Keep only the observed-wave true DGM quantities.
+
   true_r2_obs <- true_confounder_r2$observed_waves
 
   data.frame(
@@ -275,22 +298,18 @@ build_model_result_frame <- function(
     R = rep(as.integer(R), T),
     T = seq_len(T),
 
-    # keep the main-analysis flag explicitly
     analysis_flag = rep(as.integer(analysis_flag), T),
 
-    # these four columns always sum to 1
     flag0 = rep(as.numeric(flag_props$flag0), T),
     flag1 = rep(as.numeric(flag_props$flag1), T),
     flag2 = rep(as.numeric(flag_props$flag2), T),
     flag3 = rep(as.numeric(flag_props$flag3), T),
 
-    # one extra column for the main-fit improper reason
     improper_reason = rep(improper_reason, T),
 
     model = rep(encode_sem_model(spec$sem_model), T),
     residualizer = rep(encode_residualizer(spec$residualizer), T),
 
-    # explicit layer-specific metadata
     sem_exclusion = rep(compute_effective_sem_exclusion(spec$residualizer, spec$sem_model, spec$sem_exclude), T),
     sem_c_order = rep(compute_effective_sem_c_order(spec$residualizer, spec$sem_model, spec$sem_c_order), T),
     residualizer_exclusion = rep(compute_effective_residualizer_exclusion(spec$residualizer, spec$residualizer_exclude), T),
@@ -300,26 +319,23 @@ build_model_result_frame <- function(
     bootstrap_B = rep(if (uses_bootstrap_se(spec$residualizer)) as.integer(spec$bootstrap_B) else 0L, T),
     bootstrap_prop_success = rep(bootstrap_prop_success, T),
     BIC = rep(extract_bic(fit_out$fit), T),
+
     beta_x = true_par$beta_x,
     beta_y = true_par$beta_y,
     gamma_xy = true_par$gamma_xy,
     gamma_yx = true_par$gamma_yx,
+
     internal_wave = true_r2_obs$t_internal,
     true_r2_x = true_r2_obs$true_r2_x,
     true_r2_y = true_r2_obs$true_r2_y,
 
-    # keep the direct true Delta_t coefficients as well.
-    #
-    # This is intentionally a list-column rather than a wide set of scalar columns,
-    # because the number of confounder features depends on the scenario and on
-    # whether interactions are present. Storing one named vector per wave keeps the
-    # final output compact while preserving the full information needed for later
-    # inspection on the server output.
     true_delta_t_vector = I(true_r2_obs$true_delta_t_vector),
+
     mse_x = ml_main$mse_x,
     r2_x = ml_main$r2_x,
     mse_y = ml_main$mse_y,
     r2_y = ml_main$r2_y,
+
     ARX = lag$ARX,
     se_ARX = lag$se_ARX,
     ARY = lag$ARY,
@@ -328,13 +344,17 @@ build_model_result_frame <- function(
     se_CXY = lag$se_CXY,
     CYX = lag$CYX,
     se_CYX = lag$se_CYX,
+
     bootstrap_issue_vector = I(rep(list(bootstrap_issue_vector), T)),
     stringsAsFactors = FALSE
   )
 }
 
 
-# run one efficient replication for a whole set of models
+# ---- model-set replication -----------------------------------------------------------------------
+
+# Run one efficient replication for a whole set of models.
+
 run_one_replication_model_set <- function(
     R,
     N,
@@ -351,16 +371,8 @@ run_one_replication_model_set <- function(
     seed = NULL
 ) {
 
-  # compute the true confounder trajectory object once for this replication
-  # before any model is fit.
-  #
-  # This object is a property of the DGM itself and is therefore shared by all
-  # fitted models within the same replication. It now contains both:
-  # - the true confounder R^2 trajectory for X and Y
-  # - the direct Delta_t coefficients for each wave in flattened vector form
-  #
-  # Computing it once here keeps the code efficient and ensures that these true
-  # DGM quantities are still written to the output even if a later model fit fails.
+  # Compute the true confounder trajectory object once for this replication.
+
   true_confounder_r2 <- compute_true_confounder_r2(
     T = T,
     Phi = Phi,
@@ -370,7 +382,8 @@ run_one_replication_model_set <- function(
     burn_in = burn_in
   )
 
-  # simulate one data set safely
+  # Simulate one data set safely.
+
   sim <- tryCatch(
     simulate_panel_data(
       N = N,
@@ -385,7 +398,8 @@ run_one_replication_model_set <- function(
     error = function(e) structure(list(message = conditionMessage(e)), class = "sim_error")
   )
 
-  # if simulation failed, return one failed T-row frame per model immediately
+  # If simulation failed, return one failed T-row frame per model immediately.
+
   if (inherits(sim, "sim_error")) {
     failed_list <- lapply(model_specs, function(spec) {
       make_failed_replication_frame(
@@ -409,10 +423,12 @@ run_one_replication_model_set <- function(
     return(do.call(rbind, failed_list))
   }
 
-  # the simulator returns the analysis data frame directly
+  # The simulator returns the analysis data frame directly.
+
   df <- sim
 
-  # prepare each unique stage-1 data set exactly once
+  # Prepare each unique stage-1 data set exactly once.
+
   prepared_by_group <- list()
 
   for (group_obj in stage1_groups) {
@@ -431,7 +447,8 @@ run_one_replication_model_set <- function(
     )
   }
 
-  # fit every requested SEM on its already prepared stage-1 data
+  # Fit every requested SEM on its already prepared stage-1 data.
+
   fit_results <- list()
 
   for (spec in model_specs) {
@@ -458,12 +475,12 @@ run_one_replication_model_set <- function(
         free_loadings = spec$free_loadings
       )
 
-      # attach the stage-1 ML metrics used by this fitted pipeline
       fit_results[[spec$name]]$ml_metrics <- prep$ml_metrics
     }
   }
 
-  # bootstrap only the models that need it and only when the main fit exists
+  # Bootstrap only the models that need it and only when the main fit exists.
+
   bootstrap_eligible <- Filter(function(spec) {
     uses_bootstrap_se(spec$residualizer) &&
       spec$bootstrap_B >= 2L &&
@@ -483,7 +500,8 @@ run_one_replication_model_set <- function(
     setNames(vector("list", 0), character(0))
   }
 
-  # build the final stacked results frame
+  # Build the final stacked results frame.
+
   result_list <- lapply(model_specs, function(spec) {
     build_model_result_frame(
       R = R,
@@ -502,9 +520,10 @@ run_one_replication_model_set <- function(
 }
 
 
+# ---- single-model wrapper ------------------------------------------------------------------------
 
+# Run one single model through the shared replication engine.
 
-# convenience wrapper for running one single model through the shared replication engine
 run_one_replication <- function(
     R,
     N,

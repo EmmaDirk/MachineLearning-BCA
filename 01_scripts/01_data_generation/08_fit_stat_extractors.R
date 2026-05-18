@@ -1,3 +1,5 @@
+# =================================================================================================
+# 
 # These functions extract exactly the quantities needed for the final simulation output:
 # - lagged estimates from the fitted SEM
 # - model-based standard errors from the fitted SEM
@@ -6,7 +8,7 @@
 #
 # Everything is expanded to length T, with occasion 1 set to NA,
 # because no lagged effect exists at the first occasion.
-# -------------------------------------------------------------------------------------------------
+# =================================================================================================
 
 # extract lagged estimates and their model-based standard errors
 extract_lagged_estimates <- function(

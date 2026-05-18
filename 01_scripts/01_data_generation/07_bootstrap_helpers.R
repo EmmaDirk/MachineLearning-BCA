@@ -1,4 +1,5 @@
-# 07_bootstrap_helpers.R
+# =================================================================================================
+# 
 # These helpers handle the parts of the workflow that are not the main SEM fit itself:
 # - classifying runs as success / non-converged / mild improper / severe improper
 # - bootstrap-based standard errors for two-stage procedures
@@ -13,9 +14,12 @@
 # - 1 = failed or non-converged run
 # - 2 = converged but mildly improper solution
 # - 3 = converged but severely improper solution
-# -------------------------------------------------------------------------------------------------
+# =================================================================================================
 
-# identify latent random-intercept variance names that are allowed to be mild
+# ---- improper-fit helpers -----------------------------------------------------------------------
+
+# Identify latent random-intercept variance names that are allowed to be mild.
+
 is_random_intercept_variance_name <- function(name) {
 
   if (is.na(name) || !nzchar(name)) {
@@ -24,12 +28,14 @@ is_random_intercept_variance_name <- function(name) {
 
   # Names used by the RI-CLPM builder in this project are rix and riy.
   # The broader patterns below make the helper robust to common spelling variants.
+
   grepl("^ri[_]?[xy]$", name, ignore.case = TRUE) ||
     grepl("^random[_]?[ _-]?intercept[_]?[xy]$", name, ignore.case = TRUE)
 }
 
 
-# return the smallest eigenvalue of a covariance matrix
+# Return the smallest eigenvalue of a covariance matrix.
+
 matrix_min_eigenvalue <- function(S) {
 
   if (is.null(S)) {
@@ -61,26 +67,31 @@ matrix_min_eigenvalue <- function(S) {
 }
 
 
-# determine whether an improper fit is mild enough to separate from severe improper fits
+# Determine whether an improper fit is mild enough to separate from severe improper fits.
+
 is_mild_improper_fit <- function(fit, mild_neg_var_tol = 0.01, psd_tol = 1e-10) {
 
-  # failed or non-converged fits are not mild improper; they are flag 1 elsewhere
+  # Failed or non-converged fits are not mild improper; they are flag 1 elsewhere.
+
   if (is.null(fit)) {
     return(FALSE)
   }
 
   converged <- tryCatch(lavaan::lavInspect(fit, "converged"), error = function(e) FALSE)
+
   if (!isTRUE(converged)) {
     return(FALSE)
   }
 
   pe <- tryCatch(lavaan::parameterEstimates(fit), error = function(e) NULL)
+
   if (is.null(pe)) {
     return(FALSE)
   }
 
-  # Mild means: the only explicit variance problem is a small negative random
+  # Mild means that the only explicit variance problem is a small negative random
   # intercept variance. Any other negative variance remains severe.
+
   var_rows <- pe$op == "~~" & pe$lhs == pe$rhs & !is.na(pe$est)
   neg_var_rows <- which(var_rows & pe$est < -psd_tol)
 
@@ -101,14 +112,18 @@ is_mild_improper_fit <- function(fit, mild_neg_var_tol = 0.01, psd_tol = 1e-10) 
   # A small negative random-intercept variance can itself make cov.lv slightly
   # non-positive semidefinite. That is still treated as mild only when the
   # eigenvalue violation is also small. Larger matrix violations stay severe.
+
   cov_lv <- tryCatch(lavaan::lavInspect(fit, "cov.lv"), error = function(e) NULL)
   min_cov_lv <- matrix_min_eigenvalue(cov_lv)
+
   if (!is.na(min_cov_lv) && min_cov_lv < -abs(mild_neg_var_tol)) {
     return(FALSE)
   }
 
   # Residual covariance problems are not part of the ignorable random-intercept case.
+
   theta <- tryCatch(lavaan::lavInspect(fit, "theta"), error = function(e) NULL)
+
   if (matrix_not_psd(theta, tol = psd_tol)) {
     return(FALSE)
   }
@@ -117,26 +132,35 @@ is_mild_improper_fit <- function(fit, mild_neg_var_tol = 0.01, psd_tol = 1e-10) 
 }
 
 
-# classify a fitted lavaan object into the requested flag coding
+# ---- fit classification -------------------------------------------------------------------------
+
+# Classify a fitted lavaan object into the requested flag coding.
+
 classify_fit_flag <- function(fit, mild_neg_var_tol = 0.01) {
 
-  # completely failed fit counts as non-convergence
+  # Completely failed fits count as non-convergence.
+
   if (is.null(fit)) {
     return(1L)
   }
 
-  # check convergence first
+  # Check convergence first.
+
   converged <- tryCatch(lavaan::lavInspect(fit, "converged"), error = function(e) FALSE)
+
   if (!isTRUE(converged)) {
     return(1L)
   }
 
-  # lavaan already provides a broad admissibility check
+  # lavaan already provides a broad admissibility check.
+
   post_ok <- tryCatch(lavaan::lavInspect(fit, "post.check"), error = function(e) TRUE)
 
-  # extra guard: catch negative variances if they appear in the parameter table
+  # Extra guard: catch negative variances if they appear in the parameter table.
+
   pe <- tryCatch(lavaan::parameterEstimates(fit), error = function(e) NULL)
   has_negative_variance <- FALSE
+
   if (!is.null(pe)) {
     var_rows <- pe$op == "~~" & pe$lhs == pe$rhs
     has_negative_variance <- any(pe$est[var_rows] < 0, na.rm = TRUE)
@@ -146,14 +170,18 @@ classify_fit_flag <- function(fit, mild_neg_var_tol = 0.01) {
     if (is_mild_improper_fit(fit, mild_neg_var_tol = mild_neg_var_tol)) {
       return(2L)
     }
+
     return(3L)
   }
 
-  # otherwise it is a successful run
+  # Otherwise it is a successful run.
+
   0L
 }
 
-# convert one integer flag into four proportions that sum to 1
+
+# Convert one integer flag into four proportions that sum to 1.
+
 flag_to_props <- function(flag) {
 
   out <- c(flag0 = 0, flag1 = 0, flag2 = 0, flag3 = 0)
@@ -168,39 +196,48 @@ flag_to_props <- function(flag) {
 }
 
 
-# helper to turn a variance name into a readable diagnosis
+# ---- improper-fit diagnosis ---------------------------------------------------------------------
+
+# Helper to turn a variance name into a readable diagnosis.
+
 describe_negative_variance_target <- function(name) {
 
   if (is.na(name) || !nzchar(name)) {
     return("negative variance")
   }
 
-  # RI-CLPM random intercepts
+  # RI-CLPM random intercepts.
+
   if (grepl("^ri[xy]$", name)) {
     return(sprintf("negative random intercept variance (%s)", name))
   }
 
-  # DPM accumulating factors
+  # DPM accumulating factors.
+
   if (grepl("^F[XY]$", name)) {
     return(sprintf("negative accumulating factor variance (%s)", name))
   }
 
-  # RI-CLPM within-person factors
+  # RI-CLPM within-person factors.
+
   if (grepl("^w[xy][0-9]+$", name)) {
     return(sprintf("negative within-person latent variance (%s)", name))
   }
 
-  # observed variables / residual variances
+  # Observed variables / residual variances.
+
   if (grepl("^[xy][0-9]+$", name)) {
     return(sprintf("negative observed residual variance (%s)", name))
   }
 
-  # generic latent or observed variance
+  # Generic latent or observed variance.
+
   sprintf("negative variance (%s)", name)
 }
 
 
-# helper to detect whether a covariance matrix is not positive semidefinite
+# Helper to detect whether a covariance matrix is not positive semidefinite.
+
 matrix_not_psd <- function(S, tol = 1e-10) {
 
   if (is.null(S)) {
@@ -232,26 +269,32 @@ matrix_not_psd <- function(S, tol = 1e-10) {
 }
 
 
-# diagnose the main reason why a converged fit is improper
+# Diagnose the main reason why a converged fit is improper.
+
 diagnose_improper_fit <- function(fit, tol = 1e-10) {
 
-  # failed fit
+  # Failed fit.
+
   if (is.null(fit)) {
     return(NA_character_)
   }
 
-  # non-converged fit
+  # Non-converged fit.
+
   converged <- tryCatch(lavaan::lavInspect(fit, "converged"), error = function(e) FALSE)
+
   if (!isTRUE(converged)) {
     return(NA_character_)
   }
 
-  # if lavaan thinks the fit is admissible, do not attach a reason
+  # If lavaan thinks the fit is admissible, do not attach a reason.
+
   post_ok <- tryCatch(lavaan::lavInspect(fit, "post.check"), error = function(e) TRUE)
 
   pe <- tryCatch(lavaan::parameterEstimates(fit), error = function(e) NULL)
 
-  # 1) first and most interpretable case: explicit negative variances
+  # First and most interpretable case: explicit negative variances.
+
   if (!is.null(pe)) {
 
     var_rows <- pe$op == "~~" & pe$lhs == pe$rhs & !is.na(pe$est)
@@ -262,36 +305,44 @@ diagnose_improper_fit <- function(fit, tol = 1e-10) {
 
       if (length(neg_var_rows) > 0) {
 
-        # choose the most negative variance as the main culprit
+        # Choose the most negative variance as the main culprit.
+
         i <- neg_var_rows[which.min(pe$est[neg_var_rows])]
         return(describe_negative_variance_target(pe$lhs[i]))
       }
     }
   }
 
-  # 2) check the latent covariance matrix
+  # Check the latent covariance matrix.
+
   cov_lv <- tryCatch(lavaan::lavInspect(fit, "cov.lv"), error = function(e) NULL)
+
   if (matrix_not_psd(cov_lv, tol = tol)) {
     return("latent covariance matrix not positive semidefinite")
   }
 
-  # 3) check the observed residual covariance matrix
+  # Check the observed residual covariance matrix.
+
   theta <- tryCatch(lavaan::lavInspect(fit, "theta"), error = function(e) NULL)
+
   if (matrix_not_psd(theta, tol = tol)) {
     return("observed residual covariance matrix not positive semidefinite")
   }
 
-  # 4) if lavaan flagged the solution as improper but we did not localize it more precisely
+  # If lavaan flagged the solution as improper but we did not localize it more precisely.
+
   if (!isTRUE(post_ok)) {
     return("post.check failed: unspecified improper solution")
   }
 
-  # otherwise there is no improper-fit reason to report
+  # Otherwise there is no improper-fit reason to report.
+
   NA_character_
 }
 
 
-# convert fit status into a compact bootstrap issue label
+# Convert fit status into a compact bootstrap issue label.
+
 diagnose_bootstrap_issue <- function(fit, tol = 1e-10) {
 
   flag <- classify_fit_flag(fit)
@@ -306,9 +357,11 @@ diagnose_bootstrap_issue <- function(fit, tol = 1e-10) {
 
   if (flag == 2L) {
     reason <- diagnose_improper_fit(fit, tol = tol)
+
     if (is.na(reason) || !nzchar(reason)) {
       return("mild_improper_unspecified")
     }
+
     return(paste0("mild_improper: ", reason))
   }
 
@@ -322,26 +375,26 @@ diagnose_bootstrap_issue <- function(fit, tol = 1e-10) {
 }
 
 
-# determine whether the chosen pipeline needs bootstrap-based standard errors
+# ---- bootstrap setup ----------------------------------------------------------------------------
+
+# Determine whether the chosen pipeline needs bootstrap-based standard errors.
+
 uses_bootstrap_se <- function(residualizer) {
 
   residualizer %in% c("linear", "xgb", "enet")
 }
 
 
-# make one empty bootstrap summary for one model
+# Make one empty bootstrap summary for one model.
+
 make_empty_bootstrap_summary <- function(T) {
+
   list(
     ARX = rep(NA_real_, T),
     ARY = rep(NA_real_, T),
     CXY = rep(NA_real_, T),
     CYX = rep(NA_real_, T),
 
-    # bootstrap is still used here for the SEM-path standard errors and for
-    # bootstrap-based fit-success summaries. We intentionally no longer store
-    # any bootstrap summaries of the stage-1 OOF MSE / R^2 diagnostics, because
-    # those are not needed in the final saved output for the Monte Carlo
-    # comparisons across replications.
     bootstrap_prop_success = NA_real_,
     flag0 = NA_real_,
     flag1 = NA_real_,
@@ -352,19 +405,24 @@ make_empty_bootstrap_summary <- function(T) {
 }
 
 
-# summarize one bootstrap metric matrix column-wise while keeping all-NA columns as NA
+# Summarize one bootstrap metric matrix column-wise while keeping all-NA columns as NA.
+
 summarise_boot_metric <- function(M, fun = mean) {
 
   apply(M, 2, function(z) {
     if (all(is.na(z))) {
       return(NA_real_)
     }
+
     as.numeric(fun(z, na.rm = TRUE))
   })
 }
 
 
-# bootstrap a whole set of models while sharing samples and stage-1 preparation
+# ---- multi-model bootstrap ----------------------------------------------------------------------
+
+# Bootstrap a whole set of models while sharing samples and stage-1 preparation.
+
 bootstrap_model_set <- function(
     df,
     T,
@@ -374,16 +432,19 @@ bootstrap_model_set <- function(
     seed = NULL
 ) {
 
-  # keep only the model specs that actually require bootstrap-based SEs
+  # Keep only the model specs that actually require bootstrap-based SEs.
+
   bootstrap_specs <- Filter(function(x) uses_bootstrap_se(x$residualizer) && x$bootstrap_B >= 2L,
                             model_specs)
 
-  # if no model needs bootstrap, return an empty named list
+  # If no model needs bootstrap, return an empty named list.
+
   if (length(bootstrap_specs) == 0) {
     return(setNames(vector("list", 0), character(0)))
   }
 
-  # if no bootstrap seed was supplied, generate one automatically
+  # If no bootstrap seed was supplied, generate one automatically.
+
   if (is.null(seed)) {
     max_seed <- max(1L, .Machine$integer.max - 100000L)
     seed <- as.integer(sample.int(max_seed, size = 1))
@@ -391,18 +452,22 @@ bootstrap_model_set <- function(
     seed <- as.integer(seed[1])
   }
 
-  # set the bootstrap seed once
+  # Set the bootstrap seed once.
+
   set.seed(seed)
 
-  # ensure that each original row carries a stable id through the bootstrap
+  # Ensure that each original row carries a stable id through the bootstrap.
+
   if (!(".id_orig" %in% names(df))) {
     df$.id_orig <- seq_len(nrow(df))
   }
 
-  # maximum number of draws required by any bootstrap model
+  # Maximum number of draws required by any bootstrap model.
+
   max_B <- max(vapply(bootstrap_specs, function(x) x$bootstrap_B, integer(1)))
 
-  # storage for every model separately
+  # Storage for every model separately.
+
   store <- setNames(vector("list", length(bootstrap_specs)),
                     vapply(bootstrap_specs, function(x) x$name, character(1)))
 
@@ -421,18 +486,22 @@ bootstrap_model_set <- function(
     )
   }
 
-  # only stage-1 groups that are needed by bootstrap models matter here
+  # Only stage-1 groups that are needed by bootstrap models matter here.
+
   bootstrap_group_ids <- sort(unique(vapply(bootstrap_specs, function(x) x$stage1_group_id, integer(1))))
   bootstrap_groups <- Filter(function(g) g$stage1_group_id %in% bootstrap_group_ids, stage1_groups)
 
-  # bootstrap the shared pipeline
+  # Bootstrap the shared pipeline.
+
   for (b in seq_len(max_B)) {
 
-    # sample rows with replacement once
+    # Sample rows with replacement once.
+
     idx <- sample.int(n = nrow(df), size = nrow(df), replace = TRUE)
     df_b <- df[idx, , drop = FALSE]
 
-    # prepare every required stage-1 group exactly once inside this draw
+    # Prepare every required stage-1 group exactly once inside this draw.
+
     prepared_by_group <- list()
 
     for (g in seq_along(bootstrap_groups)) {
@@ -446,7 +515,8 @@ bootstrap_model_set <- function(
         residualizer_args_b <- list()
       }
 
-      # vary the stage-1 seed across draws, but keep it shared within the group
+      # Vary the stage-1 seed across draws, but keep it shared within the group.
+
       residualizer_args_b$seed <- as.integer(seed + 1000L * g + b)
 
       prepared_by_group[[as.character(group_obj$stage1_group_id)]] <- prepare_analysis_data(
@@ -461,7 +531,8 @@ bootstrap_model_set <- function(
       )
     }
 
-    # fit every bootstrap-using SEM on its already prepared data
+    # Fit every bootstrap-using SEM on its already prepared data.
+
     for (spec in bootstrap_specs) {
 
       if (b > spec$bootstrap_B) {
@@ -469,22 +540,6 @@ bootstrap_model_set <- function(
       }
 
       prep <- prepared_by_group[[as.character(spec$stage1_group_id)]]
-
-      # IMPORTANT:
-      # we no longer store bootstrap summaries of the stage-1 OOF MSE / R^2 diagnostics.
-      # Those quantities are intentionally excluded from the final Monte Carlo output,
-      # so we must not try to write them into the bootstrap store here.
-      #
-      # Earlier versions of this helper still attempted to assign
-      #   store[[spec$name]]$mse_x[b, ] <- ...
-      # etc.
-      # after those matrices had already been removed from the storage object.
-      # That causes worker-side errors such as:
-      #   "incorrect number of subscripts on matrix"
-      # because store[[spec$name]]$mse_x is then NULL.
-      #
-      # We therefore keep the prepared stage-1 object only for fitting the bootstrap SEM,
-      # and we do not store bootstrap copies of the OOF diagnostics anymore.
 
       if (is.null(prep$data)) {
         fit_b <- list(fit = NULL)
@@ -501,18 +556,22 @@ bootstrap_model_set <- function(
         )
       }
 
-      # classify every bootstrap fit, including outright failures
+      # Classify every bootstrap fit, including outright failures.
+
       store[[spec$name]]$boot_flag[b] <- classify_fit_flag(fit_b$fit)
 
-      # store a readable bootstrap issue label
+      # Store a readable bootstrap issue label.
+
       store[[spec$name]]$bootstrap_issue_vector[b] <- diagnose_bootstrap_issue(fit_b$fit)
 
-      # skip failed bootstrap fits for estimate extraction
+      # Skip failed bootstrap fits for estimate extraction.
+
       if (is.null(fit_b$fit)) {
         next
       }
 
-      # extract lagged estimates from the bootstrap fit
+      # Extract lagged estimates from the bootstrap fit.
+
       lag_b <- extract_lagged_estimates(
         fit = fit_b$fit,
         T = T,
@@ -526,7 +585,8 @@ bootstrap_model_set <- function(
     }
   }
 
-  # collapse bootstrap storage into the final summaries
+  # Collapse bootstrap storage into the final summaries.
+
   out <- setNames(vector("list", length(bootstrap_specs)), names(store))
 
   for (nm in names(store)) {
@@ -551,9 +611,10 @@ bootstrap_model_set <- function(
 }
 
 
+# ---- single-model bootstrap wrapper --------------------------------------------------------------
 
+# Convenience wrapper for bootstrapping a single model through the shared multi-model engine.
 
-# convenience wrapper for bootstrapping a single model through the shared multi-model engine
 bootstrap_pipeline_se <- function(
     df,
     T,
@@ -576,7 +637,8 @@ bootstrap_pipeline_se <- function(
     enet_tune_args = list()
 ) {
 
-  # if B < 2, return the classic empty structure
+  # If B < 2, return the classic empty structure.
+
   if (is.null(B) || B < 2) {
     return(make_empty_bootstrap_summary(T))
   }
@@ -584,6 +646,7 @@ bootstrap_pipeline_se <- function(
   # Optional standalone tuning for this convenience wrapper.
   # In the main simulation engine, tuning is resolved before bootstrapping, so this
   # block is mainly for direct calls to bootstrap_pipeline_se().
+
   if (residualizer == "xgb" && is.null(xgb_tuning) && isTRUE(tune_xgb)) {
     xgb_tuning <- do.call(
       tune_residualise_panel_xgb,

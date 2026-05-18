@@ -10,11 +10,10 @@ Four simulation scenarios cumulatively introduce violations of the linearity ass
 1. The CLPM including covariates.
 2. The CLPM fit to residuals based on Extreme Gradient Boosting (XGB) regression.
 3. The Random Intercepts (RI) CLPM.
-4. The Random Intercepts RI-CLPM including covariates. 
-5. The RI-CLPM fit to residuals based on Extreme Gradient Boosting (XGB) regression.
+4. The RI-CLPM including covariates. 
+5. The RI-CLPM fit to residuals based on XGB regression.
 
-
-
+All scenarios are evaluated at sample sizes of 300, 1000, and 2000. 
 
 ## Contents 
 

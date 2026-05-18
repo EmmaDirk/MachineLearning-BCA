@@ -1,4 +1,5 @@
-# 09_model_set_helpers.R
+# =================================================================================================
+#
 # These helpers define how a user-supplied set of model requests is translated
 # into the most efficient execution plan for the simulation study.
 #
@@ -13,15 +14,19 @@
 # 2) residualise only once per unique stage-1 recipe
 # 3) fit every compatible SEM on that same prepared data
 # 4) do the same sharing logic again inside each bootstrap draw
-# -------------------------------------------------------------------------------------------------
+# =================================================================================================
 
-# convert NULL to an empty list where helpful
+# ---- small utility helpers -----------------------------------------------------------------------
+
+# Convert NULL to an empty list where helpful.
+
 null_to_empty_list <- function(x) {
   if (is.null(x)) list() else x
 }
 
 
-# sort exclude vectors into a stable canonical format
+# Sort exclusion vectors into a stable canonical format.
+
 normalize_exclude_vector <- function(exclude) {
 
   if (is.null(exclude) || length(exclude) == 0) {
@@ -40,25 +45,26 @@ normalize_exclude_vector <- function(exclude) {
 }
 
 
-# recursively sort named lists so equality checks do not depend on argument order
+# Recursively sort named lists so equality checks do not depend on argument order.
+
 canonicalize_object <- function(x) {
 
   if (is.null(x)) {
     return(NULL)
   }
 
-  # keep data frames and matrices as they are
+  # Keep data frames and matrices as they are.
+
   if (is.data.frame(x) || is.matrix(x)) {
     return(x)
   }
 
-  # recursively canonicalize ordinary lists
+  # Recursively canonicalize ordinary lists.
+
   if (is.list(x)) {
 
-    # canonicalize every element first
     x <- lapply(x, canonicalize_object)
 
-    # if the list is named, sort by name
     if (!is.null(names(x))) {
       x <- x[order(names(x))]
     }
@@ -70,13 +76,17 @@ canonicalize_object <- function(x) {
 }
 
 
-# compare two objects after canonicalization
+# Compare two objects after canonicalization.
+
 same_canonical_object <- function(x, y) {
   identical(canonicalize_object(x), canonicalize_object(y))
 }
 
 
-# convenient constructor for one model specification
+# ---- model specification constructor -------------------------------------------------------------
+
+# Construct one model specification.
+
 make_model_spec <- function(
     name = NULL,
     residualizer = c("none", "linear", "xgb", "enet"),
@@ -104,11 +114,9 @@ make_model_spec <- function(
     residualizer = residualizer,
     sem_model = sem_model,
 
-    # SEM-layer analyst choices
     sem_c_order = sem_c_order,
     sem_exclude = sem_exclude,
 
-    # residualiser-layer analyst choices
     residualizer_c_order = residualizer_c_order,
     residualizer_exclude = residualizer_exclude,
 
@@ -125,15 +133,16 @@ make_model_spec <- function(
 }
 
 
-# normalize one user-supplied model specification into a stable internal format
+# ---- model specification normalization ----------------------------------------------------------
+
+# Normalize one user-supplied model specification into a stable internal format.
+
 normalize_model_spec <- function(spec, idx = NULL) {
 
-  # allow the user to pass an unnamed list with the same fields
   if (!is.list(spec)) {
     stop("Each model specification must be a list, for example created by make_model_spec().")
   }
 
-  # defaults
   default <- list(
     name = NULL,
     residualizer = "none",
@@ -153,14 +162,16 @@ normalize_model_spec <- function(spec, idx = NULL) {
     residualizer_args = list()
   )
 
-  # fill missing entries from defaults
+  # Fill missing entries from defaults.
+
   for (nm in names(default)) {
     if (is.null(spec[[nm]]) && !(nm %in% names(spec))) {
       spec[[nm]] <- default[[nm]]
     }
   }
 
-  # remove any old one-layer arguments immediately
+  # Reject old one-layer arguments immediately.
+
   if ("confounder_order" %in% names(spec)) {
     stop(
       "The old shared argument 'confounder_order' is no longer supported. ",
@@ -175,11 +186,13 @@ normalize_model_spec <- function(spec, idx = NULL) {
     )
   }
 
-  # match the two required choices
+  # Match the two required model choices.
+
   spec$residualizer <- match.arg(spec$residualizer, c("none", "linear", "xgb", "enet"))
   spec$sem_model <- match.arg(spec$sem_model, c("clpm", "riclpm", "dpm"))
 
-  # fill remaining defaults explicitly
+  # Fill and validate the model name.
+
   if (is.null(spec$name)) {
     spec$name <- paste0("model_", if (is.null(idx)) 1L else as.integer(idx))
   }
@@ -188,15 +201,7 @@ normalize_model_spec <- function(spec, idx = NULL) {
     stop("Each model specification must have a non-empty character 'name'.")
   }
 
-  # ---------------------------------------------------------------------------
-  # confounder specification
-  # ---------------------------------------------------------------------------
-  # We now require two separate analyst-side layers:
-  # 1) the SEM layer
-  # 2) the residualiser layer
-  #
-  # There is no fallback to any old one-layer argument set.
-  # Every model specification must state the two layers directly.
+  # Validate SEM-side confounder settings.
 
   spec$sem_c_order <- as.integer(spec$sem_c_order[1])
 
@@ -206,19 +211,25 @@ normalize_model_spec <- function(spec, idx = NULL) {
 
   spec$sem_exclude <- normalize_exclude_vector(spec$sem_exclude)
 
+  # Validate residualiser-side confounder settings.
+
   spec$residualizer_c_order <- as.integer(spec$residualizer_c_order[1])
 
-  if (is.na(spec$residualizer_c_order) || !(spec$residualizer_c_order %in% c(0L, 1L, 2L, 3L))) {
+  if (is.na(spec$residualizer_c_order) ||
+      !(spec$residualizer_c_order %in% c(0L, 1L, 2L, 3L))) {
     stop("Each model specification must have residualizer_c_order in {0, 1, 2, 3}.")
   }
 
   spec$residualizer_exclude <- normalize_exclude_vector(spec$residualizer_exclude)
+
+  # Validate remaining model-specific settings.
 
   spec$free_loadings <- isTRUE(spec$free_loadings)
 
   if (is.null(spec$bootstrap_B)) {
     spec$bootstrap_B <- default$bootstrap_B
   }
+
   spec$bootstrap_B <- as.integer(spec$bootstrap_B[1])
 
   if (is.na(spec$bootstrap_B) || spec$bootstrap_B < 0L) {
@@ -227,6 +238,7 @@ normalize_model_spec <- function(spec, idx = NULL) {
 
   spec$tune_xgb <- isTRUE(spec$tune_xgb)
   spec$tune_enet <- isTRUE(spec$tune_enet)
+
   spec$xgb_tune_args <- null_to_empty_list(spec$xgb_tune_args)
   spec$enet_tune_args <- null_to_empty_list(spec$enet_tune_args)
   spec$residualizer_args <- null_to_empty_list(spec$residualizer_args)
@@ -243,7 +255,8 @@ normalize_model_spec <- function(spec, idx = NULL) {
     stop("Each model specification must have 'residualizer_args' as a list.")
   }
 
-  # group ids are assigned later
+  # Group ids are assigned later.
+
   spec$xgb_tuning_group_id <- NA_integer_
   spec$enet_tuning_group_id <- NA_integer_
   spec$stage1_group_id <- NA_integer_
@@ -252,7 +265,8 @@ normalize_model_spec <- function(spec, idx = NULL) {
 }
 
 
-# normalize a whole list of model specifications
+# Normalize a whole list of model specifications.
+
 normalize_model_spec_list <- function(model_specs) {
 
   if (is.null(model_specs) || length(model_specs) == 0) {
@@ -271,11 +285,15 @@ normalize_model_spec_list <- function(model_specs) {
   }
 
   names(specs) <- spec_names
+
   specs
 }
 
 
-# decide whether two XGB model specs can share the same one-time tuning object
+# ---- XGB tuning groups --------------------------------------------------------------------------
+
+# Decide whether two XGB model specs can share the same one-time tuning object.
+
 same_xgb_tuning_recipe <- function(spec_a, spec_b) {
 
   if (spec_a$residualizer != "xgb" || spec_b$residualizer != "xgb") {
@@ -290,20 +308,22 @@ same_xgb_tuning_recipe <- function(spec_a, spec_b) {
     return(FALSE)
   }
 
-  # if one spec already brings its own tuning object and the other does not,
-  # keep them separate to avoid assuming they are the same
+  # If only one spec brings its own tuning object, keep the specs separate.
+
   if (is.null(spec_a$xgb_tuning) != is.null(spec_b$xgb_tuning)) {
     return(FALSE)
   }
 
-  # if both bring a tuning object, it must be identical
+  # If both specs bring tuning objects, those objects must be identical.
+
   if (!is.null(spec_a$xgb_tuning) && !is.null(spec_b$xgb_tuning)) {
     if (!same_canonical_object(spec_a$xgb_tuning, spec_b$xgb_tuning)) {
       return(FALSE)
     }
   }
 
-  # when tuning is done internally, the requested tuning setup must match
+  # If tuning is done internally, the requested tuning setup must match.
+
   if (!same_canonical_object(spec_a$xgb_tune_args, spec_b$xgb_tune_args)) {
     return(FALSE)
   }
@@ -316,7 +336,8 @@ same_xgb_tuning_recipe <- function(spec_a, spec_b) {
 }
 
 
-# assign one XGB tuning-group id to every specification
+# Assign one XGB tuning-group id to every specification.
+
 assign_xgb_tuning_group_ids <- function(model_specs) {
 
   specs <- model_specs
@@ -350,7 +371,10 @@ assign_xgb_tuning_group_ids <- function(model_specs) {
 }
 
 
-# decide whether two Elastic Net model specs can share the same one-time tuning object
+# ---- elastic net tuning groups ------------------------------------------------------------------
+
+# Decide whether two Elastic Net model specs can share the same one-time tuning object.
+
 same_enet_tuning_recipe <- function(spec_a, spec_b) {
 
   if (spec_a$residualizer != "enet" || spec_b$residualizer != "enet") {
@@ -365,20 +389,22 @@ same_enet_tuning_recipe <- function(spec_a, spec_b) {
     return(FALSE)
   }
 
-  # if one spec already brings its own tuning object and the other does not,
-  # keep them separate to avoid assuming they are the same
+  # If only one spec brings its own tuning object, keep the specs separate.
+
   if (is.null(spec_a$enet_tuning) != is.null(spec_b$enet_tuning)) {
     return(FALSE)
   }
 
-  # if both bring a tuning object, it must be identical
+  # If both specs bring tuning objects, those objects must be identical.
+
   if (!is.null(spec_a$enet_tuning) && !is.null(spec_b$enet_tuning)) {
     if (!same_canonical_object(spec_a$enet_tuning, spec_b$enet_tuning)) {
       return(FALSE)
     }
   }
 
-  # when tuning is done internally, the requested tuning setup must match
+  # If tuning is done internally, the requested tuning setup must match.
+
   if (!same_canonical_object(spec_a$enet_tune_args, spec_b$enet_tune_args)) {
     return(FALSE)
   }
@@ -391,7 +417,8 @@ same_enet_tuning_recipe <- function(spec_a, spec_b) {
 }
 
 
-# assign one Elastic Net tuning-group id to every specification
+# Assign one Elastic Net tuning-group id to every specification.
+
 assign_enet_tuning_group_ids <- function(model_specs) {
 
   specs <- model_specs
@@ -425,14 +452,18 @@ assign_enet_tuning_group_ids <- function(model_specs) {
 }
 
 
-# decide whether two model specs can share the same prepared stage-1 data
+# ---- stage-1 execution groups -------------------------------------------------------------------
+
+# Decide whether two model specs can share the same prepared stage-1 data.
+
 same_stage1_recipe <- function(spec_a, spec_b) {
 
   if (spec_a$residualizer != spec_b$residualizer) {
     return(FALSE)
   }
 
-  # no residualisation means raw renamed data, so all "none" models can share it
+  # No residualisation means raw renamed data, so all "none" models can share it.
+
   if (spec_a$residualizer == "none") {
     return(TRUE)
   }
@@ -461,7 +492,8 @@ same_stage1_recipe <- function(spec_a, spec_b) {
 }
 
 
-# assign one stage-1 group id to every specification
+# Assign one stage-1 group id to every specification.
+
 assign_stage1_group_ids <- function(model_specs) {
 
   specs <- model_specs
@@ -490,7 +522,8 @@ assign_stage1_group_ids <- function(model_specs) {
 }
 
 
-# build a readable stage-1 group object list
+# Build a readable stage-1 group object list.
+
 build_stage1_groups <- function(model_specs) {
 
   group_ids <- sort(unique(vapply(model_specs, function(x) x$stage1_group_id, integer(1))))
@@ -508,11 +541,16 @@ build_stage1_groups <- function(model_specs) {
 }
 
 
-# split a combined results frame back into the originally requested model-specific frames
+# ---- results splitting --------------------------------------------------------------------------
+
+# Split a combined results frame back into the originally requested model-specific frames.
+
 split_results_by_model_name <- function(results_df, model_specs) {
 
-  out <- setNames(vector("list", length(model_specs)),
-                  vapply(model_specs, function(x) x$name, character(1)))
+  out <- setNames(
+    vector("list", length(model_specs)),
+    vapply(model_specs, function(x) x$name, character(1))
+  )
 
   for (nm in names(out)) {
     out[[nm]] <- results_df[results_df$model_name == nm, , drop = FALSE]

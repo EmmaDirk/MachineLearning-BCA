@@ -1,4 +1,4 @@
-# ------------------------------------------------------------------------------------------------
+# =================================================================================================
 #
 # This script defines a function for sampling the coefficient matrix Delta_t. Delta_t
 # determines how the baseline-confounder term vector M contributes directly to X_t
@@ -61,7 +61,7 @@
 # The interaction terms themselves are standardized products of Gaussian variables.
 # They are centered and have variance 1, but they are not normally distributed.
 #
-# ------------------------------------------------------------------------------------------------
+# =================================================================================================
 
 sample_delta_t <- function(
   k,                             # number of base confounders in C
@@ -77,7 +77,7 @@ sample_delta_t <- function(
   eig_tol = 1e-10                # tolerance for the positive-semidefinite check
 ) {
 
-  # ------------------------- input checks -------------------------
+  # ---- input checks ------------------------------------------------------------------------------
   #
   # This section checks whether the input arguments are compatible with the
   # coefficient-sampling procedure described in Appendix A.
@@ -137,7 +137,7 @@ sample_delta_t <- function(
   if (max_abs < min_abs)
     stop("max_abs must be >= min_abs.")
 
-  # ------------------------- dimensions ---------------------------
+  # ---- dimensions --------------------------------------------------------------------------------
   #
   # This section determines the number of two-way and three-way interaction
   # terms that appear in the expanded vector M.
@@ -157,7 +157,7 @@ sample_delta_t <- function(
   # The target interaction contribution is rho_int times R2_total.
   VNL_star <- rho_int * R2_total
 
-  # ------------------------- helper functions ---------------------
+  # ---- helper functions --------------------------------------------------------------------------
   #
   # These functions construct the index sets needed for the interaction terms.
 
@@ -169,7 +169,7 @@ sample_delta_t <- function(
   # For k = 4, this includes rows such as (1, 2, 3) and (1, 2, 4).
   all_triples <- function(k) t(combn(seq_len(k), 3))
 
-  # ------------------------- covariance objects -------------------
+  # ---- covariance objects ------------------------------------------------------------------------
   #
   # This section computes the covariance blocks of the expanded vector M.
   #
@@ -431,7 +431,7 @@ sample_delta_t <- function(
     Omega13
   }
 
-  # ---------------------------- solve scales -------------------------------
+  # ---- solve scales ------------------------------------------------------------------------------
   #
   # This function finds the two scale factors used in Appendix A:
   #
@@ -543,7 +543,7 @@ sample_delta_t <- function(
     list(sL = sL, s = s, r = r)
   }
 
-  # ----------------------- covariance blocks ----------------------------
+  # ---- covariance blocks -------------------------------------------------------------------------
   #
   # The covariance blocks depend only on Omega11 and on which interaction terms
   # are included. They are computed once and then reused during sampling.
@@ -563,7 +563,7 @@ sample_delta_t <- function(
     Omega13 <- build_Omega13(Omega11)
   }
 
-  # ----------------------- feature names --------------------------------
+  # ---- feature names -----------------------------------------------------------------------------
   #
   # These names label the entries of M and the columns of the returned Delta_t.
 
@@ -597,7 +597,7 @@ sample_delta_t <- function(
     colnames(Omega13) <- T_names
   }
 
-  # ----------------------- full Omega matrix ----------------------------
+  # ---- full Omega matrix -------------------------------------------------------------------------
   #
   # This helper builds the full covariance matrix Omega of M:
   #
@@ -643,7 +643,7 @@ sample_delta_t <- function(
     Omega
   }
 
-  # ------------------------- sample one row -----------------------------
+  # ---- sample one row ----------------------------------------------------------------------------
   #
   # This helper samples one coefficient vector delta_t for one generic outcome.
   # The main function calls it twice: once for X and once for Y.
@@ -715,7 +715,7 @@ sample_delta_t <- function(
     c(delta_L, delta_2, delta_3)
   }
 
-  # ------------------------- main sampling loop --------------------------
+  # ---- main sampling loop ------------------------------------------------------------------------
   #
   # The procedure samples one row for X and one row for Y. If coefficient bounds
   # are imposed through min_abs and max_abs, sampling is repeated until both rows
@@ -758,6 +758,3 @@ sample_delta_t <- function(
   stop("Failed to sample Delta_t within max_tries. Try relaxing bounds or increasing max_tries.")
 }
 
-# Optional backward-compatible alias. Remove this line if downstream code has
-# already been updated to call sample_delta_t() directly.
-sample_delta_1 <- sample_delta_t

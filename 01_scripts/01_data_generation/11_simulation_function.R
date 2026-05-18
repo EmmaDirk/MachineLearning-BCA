@@ -1,4 +1,6 @@
-# This is the top-level simulation runner.
+# =================================================================================================
+#
+# This script contains the shared simulation engine used by the top-level runner.
 #
 # The efficient model-set interface lets you define multiple analysis pipelines
 # and then runs them in the computationally cheapest order:
@@ -7,10 +9,16 @@
 # - all compatible SEMs fit on that same prepared data
 # - bootstrap draws shared the same way
 #
-# Single-model use is still supported, but it is routed through the same shared engine.
-# -------------------------------------------------------------------------------------------------
+# Single-model use is supported through a wrapper around the same shared engine.
+#
+# Thread and worker counts are controlled by the top-level simulation runner. This script only
+# receives the requested number of worker processes through the cores argument.
+# =================================================================================================
 
-# validate one single model-spec argument combination before any replication starts
+# ---- validation helpers --------------------------------------------------------------------------
+
+# Validate one model specification before any replication starts.
+
 validate_simulation_inputs <- function(
     residualizer,
     xgb_tuning,
@@ -22,32 +30,40 @@ validate_simulation_inputs <- function(
     residualizer_args
 ) {
 
-  # match the residualiser choice
+  # Match the residualiser choice.
+
   residualizer <- match.arg(residualizer, c("none", "linear", "xgb", "enet"))
 
-  # normalize NULL inputs to empty lists where appropriate
+  # Convert NULL argument lists to empty lists.
+
   if (is.null(xgb_tune_args)) {
     xgb_tune_args <- list()
   }
+
   if (is.null(enet_tune_args)) {
     enet_tune_args <- list()
   }
+
   if (is.null(residualizer_args)) {
     residualizer_args <- list()
   }
 
-  # require lists
+  # Require all optional argument containers to be lists.
+
   if (!is.list(xgb_tune_args)) {
     stop("'xgb_tune_args' must be a list.")
   }
+
   if (!is.list(enet_tune_args)) {
     stop("'enet_tune_args' must be a list.")
   }
+
   if (!is.list(residualizer_args)) {
     stop("'residualizer_args' must be a list.")
   }
 
-  # allowed arguments for one-time XGB tuning
+  # ---- allowed argument names --------------------------------------------------------------------
+
   xgb_tune_allowed <- c(
     "x_prefix",
     "y_prefix",
@@ -65,7 +81,6 @@ validate_simulation_inputs <- function(
     "seed"
   )
 
-  # allowed arguments for Elastic Net one-time tuning
   enet_tune_allowed <- c(
     "x_prefix",
     "y_prefix",
@@ -77,7 +92,6 @@ validate_simulation_inputs <- function(
     "seed"
   )
 
-  # allowed arguments for the linear residualiser
   linear_allowed <- c(
     "x_prefix",
     "y_prefix",
@@ -86,7 +100,6 @@ validate_simulation_inputs <- function(
     "seed"
   )
 
-  # allowed arguments for the XGB residualiser
   xgb_resid_allowed <- c(
     "x_prefix",
     "y_prefix",
@@ -98,7 +111,6 @@ validate_simulation_inputs <- function(
     "seed"
   )
 
-  # allowed arguments for the Elastic Net residualiser
   enet_resid_allowed <- c(
     "x_prefix",
     "y_prefix",
@@ -107,7 +119,8 @@ validate_simulation_inputs <- function(
     "seed"
   )
 
-  # no residualisation: tuning and residualiser extras must both be empty
+  # ---- no residualisation ------------------------------------------------------------------------
+
   if (residualizer == "none") {
 
     if (length(xgb_tune_args) > 0) {
@@ -151,7 +164,8 @@ validate_simulation_inputs <- function(
     }
   }
 
-  # linear residualisation: no XGB settings are allowed
+  # ---- linear residualisation --------------------------------------------------------------------
+
   if (residualizer == "linear") {
 
     if (length(xgb_tune_args) > 0) {
@@ -199,7 +213,8 @@ validate_simulation_inputs <- function(
     }
   }
 
-  # XGB residualisation: require sensible tuning-related inputs
+  # ---- XGB residualisation -----------------------------------------------------------------------
+
   if (residualizer == "xgb") {
 
     bad_xgb_tune <- setdiff(names(xgb_tune_args), xgb_tune_allowed)
@@ -246,7 +261,8 @@ validate_simulation_inputs <- function(
     }
   }
 
-  # Elastic Net residualisation: require sensible tuning-related inputs
+  # ---- elastic net residualisation ---------------------------------------------------------------
+
   if (residualizer == "enet") {
 
     if (length(xgb_tune_args) > 0) {
@@ -301,7 +317,8 @@ validate_simulation_inputs <- function(
 }
 
 
-# validate every model specification before any replication starts
+# Validate every model specification before any replication starts.
+
 validate_model_spec_list <- function(model_specs) {
 
   for (spec in model_specs) {
@@ -321,59 +338,10 @@ validate_model_spec_list <- function(model_specs) {
 }
 
 
-# choose a sensible number of worker cores
-resolve_core_count <- function(cores) {
+# ---- worker script resolution -------------------------------------------------------------------
 
-  if (is.null(cores)) {
-    cores <- max(1L, parallel::detectCores(logical = FALSE) - 1L)
-  }
+# Define the default script order used when workers source the simulation code.
 
-  cores <- as.integer(cores[1])
-
-  if (is.na(cores) || cores < 1L) {
-    stop("'cores' must be a positive integer.")
-  }
-
-  cores
-}
-
-
-# apply conservative thread caps for threaded math libraries inside each R process
-# This is critical when we parallelise at the replication level, because otherwise each
-# worker process may itself try to use many BLAS / OpenMP threads.
-set_single_thread_math_env <- function() {
-
-  Sys.setenv(
-    OMP_NUM_THREADS = "1",
-    OMP_DYNAMIC = "FALSE",
-    OPENBLAS_NUM_THREADS = "1",
-    MKL_NUM_THREADS = "1",
-    MKL_DYNAMIC = "FALSE",
-    BLIS_NUM_THREADS = "1",
-    VECLIB_MAXIMUM_THREADS = "1",
-    NUMEXPR_NUM_THREADS = "1"
-  )
-
-  invisible(TRUE)
-}
-
-
-# best-effort helper to also cap BLAS / OpenMP threads from inside R when RhpcBLASctl
-# is available. The simulation still works when the package is not installed.
-cap_threads_runtime <- function() {
-
-  if (!requireNamespace("RhpcBLASctl", quietly = TRUE)) {
-    return(invisible(FALSE))
-  }
-
-  try(RhpcBLASctl::blas_set_num_threads(1L), silent = TRUE)
-  try(RhpcBLASctl::omp_set_num_threads(1L), silent = TRUE)
-
-  invisible(TRUE)
-}
-
-
-# default script file order for worker-side sourcing
 default_worker_script_files <- function() {
 
   c(
@@ -392,61 +360,37 @@ default_worker_script_files <- function() {
 }
 
 
-# resolve the exact worker script file set once so the master and workers stay on the same code path
+# Resolve the worker script file set once, so master and workers use the same code path.
+
 resolve_worker_script_files <- function(script_dir, script_files = NULL) {
 
   if (is.null(script_dir)) {
     return(NULL)
   }
 
-  # if the caller already passed an explicit file vector, use exactly that vector
-  if (!is.null(script_files)) {
-    script_files <- as.character(script_files)
-
-    missing_files <- script_files[!file.exists(file.path(script_dir, script_files))]
-    if (length(missing_files) > 0) {
-      stop(
-        "The following worker script files were requested but not found: ",
-        paste(missing_files, collapse = ", ")
-      )
-    }
-
-    return(script_files)
+  if (is.null(script_files)) {
+    script_files <- default_worker_script_files()
   }
 
-  # otherwise, choose a canonical set with backward-compatible fallbacks for renamed files
-  candidate_groups <- list(
-    c("01_delta_sampler.R"),
-    c("02_delta_trajectory.R"),
-    c("03_simulate_panel_data.R"),
-    c("04_lavaan_model_string_builder.R"),
-    c("05_residualisers.R"),
-    c("06_model_fitters.R"),
-    c("07_bootstrap_helpers.R", "07_bootstrap_helpers_fixed.R", "07_bootstrap_helpers_nobc.R"),
-    c("08_fit_stat_extractors.R"),
-    c("09_model_set_helpers.R", "09_model_set_helpers_nobc.R"),
-    c("10_one_replication_wrapper.R", "10_one_replication_wrapper_nobc.R"),
-    c("11_simulation_function.R", "11_simulation_function_nobc.R")
-  )
+  script_files <- as.character(script_files)
 
-  chosen <- vapply(candidate_groups, function(candidates) {
-    hit <- candidates[file.exists(file.path(script_dir, candidates))]
+  missing_files <- script_files[!file.exists(file.path(script_dir, script_files))]
 
-    if (length(hit) == 0) {
-      stop(
-        "Could not resolve a required worker script in ", script_dir,
-        ". Tried: ", paste(candidates, collapse = ", ")
-      )
-    }
+  if (length(missing_files) > 0L) {
+    stop(
+      "The following worker script files were requested but not found: ",
+      paste(missing_files, collapse = ", ")
+    )
+  }
 
-    hit[1]
-  }, character(1))
-
-  as.character(chosen)
+  script_files
 }
 
 
-# collect the simulation helper functions that should be available on every worker
+# ---- worker helper export -----------------------------------------------------------------------
+
+# Collect the simulation helper functions that should be available on every worker.
+
 simulation_helper_function_names <- function(helper_env = environment(run_simulation_model_set)) {
 
   helper_names <- ls(envir = helper_env, all.names = FALSE)
@@ -457,7 +401,8 @@ simulation_helper_function_names <- function(helper_env = environment(run_simula
 }
 
 
-# export the helper functions directly when worker-side sourcing is not available
+# Export helper functions directly when worker-side sourcing is not available.
+
 export_simulation_helpers_to_cluster <- function(
     cl,
     helper_env = environment(run_simulation_model_set),
@@ -482,101 +427,8 @@ export_simulation_helpers_to_cluster <- function(
 }
 
 
-# worker entry point that uses only the explicitly exported run context
-run_one_replication_from_exported_context <- function(r) {
+# Export only the objects required by the current run.
 
-  r <- as.integer(r[1])
-
-  run_one_replication_model_set(
-    R = r,
-    N = N,
-    T = T,
-    k = k,
-    Phi = Phi,
-    Sigma = Sigma,
-    Omega11 = Omega11,
-    Delta_list = Delta_list,
-    model_specs = model_specs,
-    stage1_groups = stage1_groups,
-    burn_in = burn_in,
-    bootstrap_seed = if (is.null(bootstrap_seed)) NULL else bootstrap_seed + r,
-    seed = rep_seeds[r]
-  )
-}
-
-
-# initialize a PSOCK cluster once without exporting the whole global environment
-# Workers either source the exact same study scripts as the master session, or
-# receive only the helper functions that are actually needed for the replication work.
-make_simulation_cluster <- function(
-    cores,
-    script_dir = NULL,
-    script_files = NULL,
-    helper_env = environment(run_simulation_model_set)
-) {
-
-  cl <- parallel::makeCluster(cores)
-
-  # cap implicit threading inside every worker before heavy work starts
-  parallel::clusterEvalQ(cl, {
-    Sys.setenv(
-      OMP_NUM_THREADS = "1",
-      OMP_DYNAMIC = "FALSE",
-      OPENBLAS_NUM_THREADS = "1",
-      MKL_NUM_THREADS = "1",
-      MKL_DYNAMIC = "FALSE",
-      BLIS_NUM_THREADS = "1",
-      VECLIB_MAXIMUM_THREADS = "1",
-      NUMEXPR_NUM_THREADS = "1"
-    )
-
-    if (requireNamespace("RhpcBLASctl", quietly = TRUE)) {
-      try(RhpcBLASctl::blas_set_num_threads(1L), silent = TRUE)
-      try(RhpcBLASctl::omp_set_num_threads(1L), silent = TRUE)
-    }
-
-    library(lavaan)
-    library(pbapply)
-    library(xgboost)
-    library(glmnet)
-    NULL
-  })
-
-  resolved_script_files <- resolve_worker_script_files(
-    script_dir = script_dir,
-    script_files = script_files
-  )
-
-  # source the exact same worker script set when available
-  if (!is.null(script_dir) && !is.null(resolved_script_files)) {
-
-    parallel::clusterExport(
-      cl = cl,
-      varlist = c("script_dir", "resolved_script_files"),
-      envir = environment()
-    )
-
-    parallel::clusterEvalQ(cl, {
-      for (f in resolved_script_files) {
-        source(file.path(script_dir, f))
-      }
-      NULL
-    })
-
-  } else {
-
-    # fallback for sessions where the scripts were sourced ad hoc and no project script_dir exists
-    export_simulation_helpers_to_cluster(
-      cl = cl,
-      helper_env = helper_env
-    )
-  }
-
-  cl
-}
-
-
-# export only the objects required by the current run instead of the entire global environment
 export_run_context_to_cluster <- function(
     cl,
     N,
@@ -616,7 +468,97 @@ export_run_context_to_cluster <- function(
 }
 
 
-# tune XGB only once per unique XGB tuning recipe and assign the result back to every model spec
+# ---- worker entry point -------------------------------------------------------------------------
+
+# Run one replication from the context exported to the worker.
+
+run_one_replication_from_exported_context <- function(r) {
+
+  r <- as.integer(r[1])
+
+  run_one_replication_model_set(
+    R = r,
+    N = N,
+    T = T,
+    k = k,
+    Phi = Phi,
+    Sigma = Sigma,
+    Omega11 = Omega11,
+    Delta_list = Delta_list,
+    model_specs = model_specs,
+    stage1_groups = stage1_groups,
+    burn_in = burn_in,
+    bootstrap_seed = if (is.null(bootstrap_seed)) NULL else bootstrap_seed + r,
+    seed = rep_seeds[r]
+  )
+}
+
+
+# ---- cluster setup ------------------------------------------------------------------------------
+
+# Initialise a PSOCK cluster without exporting the whole global environment.
+
+make_simulation_cluster <- function(
+    cores,
+    script_dir = NULL,
+    script_files = NULL,
+    helper_env = environment(run_simulation_model_set)
+) {
+
+  cl <- parallel::makeCluster(cores)
+
+  # Load required packages on each worker. Thread limits are set by the top-level runner.
+
+  parallel::clusterEvalQ(cl, {
+    library(lavaan)
+    library(pbapply)
+    library(xgboost)
+    library(glmnet)
+
+    NULL
+  })
+
+  resolved_script_files <- resolve_worker_script_files(
+    script_dir = script_dir,
+    script_files = script_files
+  )
+
+  # Source the exact same worker script set when available.
+
+  if (!is.null(script_dir) && !is.null(resolved_script_files)) {
+
+    parallel::clusterExport(
+      cl = cl,
+      varlist = c("script_dir", "resolved_script_files"),
+      envir = environment()
+    )
+
+    parallel::clusterEvalQ(cl, {
+      for (f in resolved_script_files) {
+        source(file.path(script_dir, f))
+      }
+
+      NULL
+    })
+
+  } else {
+
+    # Export helper functions only when no script directory is available.
+
+    export_simulation_helpers_to_cluster(
+      cl = cl,
+      helper_env = helper_env
+    )
+  }
+
+  cl
+}
+
+
+# ---- XGB tuning ---------------------------------------------------------------------------------
+
+# Tune XGB once per unique XGB recipe and assign the result back to every matching model.
+
 resolve_xgb_tuning_objects <- function(
     model_specs,
     N,
@@ -634,12 +576,10 @@ resolve_xgb_tuning_objects <- function(
 
   xgb_specs <- Filter(function(x) x$residualizer == "xgb", specs)
 
-  # if no XGB model is present, nothing to do
   if (length(xgb_specs) == 0) {
     return(specs)
   }
 
-  # do we need to run internal tuning at all?
   needs_internal_tuning <- any(vapply(
     xgb_specs,
     function(x) is.null(x$xgb_tuning) && isTRUE(x$tune_xgb),
@@ -652,7 +592,6 @@ resolve_xgb_tuning_objects <- function(
 
     message("Stage 1/2: tuning XGBoost")
 
-    # simulate one pilot data set under the same data-generating mechanism
     df_pilot <- simulate_panel_data(
       N = N,
       T = T,
@@ -665,14 +604,21 @@ resolve_xgb_tuning_objects <- function(
     )
   }
 
-  # resolve one tuning object per unique tuning group
-  tuning_group_ids <- sort(unique(vapply(xgb_specs, function(x) x$xgb_tuning_group_id, integer(1))))
+  tuning_group_ids <- sort(unique(vapply(
+    xgb_specs,
+    function(x) x$xgb_tuning_group_id,
+    integer(1)
+  )))
 
   for (gid in tuning_group_ids) {
 
-    idx <- which(vapply(specs, function(x) identical(x$xgb_tuning_group_id, gid), logical(1)))
-    proto <- specs[[idx[1]]]
+    idx <- which(vapply(
+      specs,
+      function(x) identical(x$xgb_tuning_group_id, gid),
+      logical(1)
+    ))
 
+    proto <- specs[[idx[1]]]
     tuning_obj <- proto$xgb_tuning
 
     if (is.null(tuning_obj) && isTRUE(proto$tune_xgb)) {
@@ -700,7 +646,10 @@ resolve_xgb_tuning_objects <- function(
 }
 
 
-# tune Elastic Net only once per unique Elastic Net tuning recipe and assign the result back to every model spec
+# ---- elastic net tuning -------------------------------------------------------------------------
+
+# Tune Elastic Net once per unique Elastic Net recipe and assign the result back to each model.
+
 resolve_enet_tuning_objects <- function(
     model_specs,
     N,
@@ -718,12 +667,10 @@ resolve_enet_tuning_objects <- function(
 
   enet_specs <- Filter(function(x) x$residualizer == "enet", specs)
 
-  # if no Elastic Net model is present, nothing to do
   if (length(enet_specs) == 0) {
     return(specs)
   }
 
-  # do we need to run internal tuning at all?
   needs_internal_tuning <- any(vapply(
     enet_specs,
     function(x) is.null(x$enet_tuning) && isTRUE(x$tune_enet),
@@ -736,7 +683,6 @@ resolve_enet_tuning_objects <- function(
 
     message("Stage 1.5/2: tuning Elastic Net")
 
-    # simulate one pilot data set under the same data-generating mechanism
     df_pilot <- simulate_panel_data(
       N = N,
       T = T,
@@ -749,14 +695,21 @@ resolve_enet_tuning_objects <- function(
     )
   }
 
-  # resolve one tuning object per unique tuning group
-  tuning_group_ids <- sort(unique(vapply(enet_specs, function(x) x$enet_tuning_group_id, integer(1))))
+  tuning_group_ids <- sort(unique(vapply(
+    enet_specs,
+    function(x) x$enet_tuning_group_id,
+    integer(1)
+  )))
 
   for (gid in tuning_group_ids) {
 
-    idx <- which(vapply(specs, function(x) identical(x$enet_tuning_group_id, gid), logical(1)))
-    proto <- specs[[idx[1]]]
+    idx <- which(vapply(
+      specs,
+      function(x) identical(x$enet_tuning_group_id, gid),
+      logical(1)
+    ))
 
+    proto <- specs[[idx[1]]]
     tuning_obj <- proto$enet_tuning
 
     if (is.null(tuning_obj) && isTRUE(proto$tune_enet)) {
@@ -784,7 +737,10 @@ resolve_enet_tuning_objects <- function(
 }
 
 
-# run the efficient multi-model simulation study
+# ---- shared simulation engine -------------------------------------------------------------------
+
+# Run the efficient multi-model simulation study.
+
 run_simulation_model_set <- function(
     reps,
     N,
@@ -801,25 +757,30 @@ run_simulation_model_set <- function(
     base_seed = 1234
 ) {
 
-  # check burn-in
+  # Check the burn-in length.
+
   if (!is.numeric(burn_in) || length(burn_in) != 1 || is.na(burn_in) ||
       burn_in < 0 || burn_in != as.integer(burn_in)) {
     stop("'burn_in' must be a single non-negative integer.")
   }
+
   burn_in <- as.integer(burn_in)
 
-  # normalize and validate the whole model set
+  # Validate the full model set before running any replication.
+
   model_specs <- normalize_model_spec_list(model_specs)
   validate_model_spec_list(model_specs)
 
-  # choose a default number of cores
-  cores <- resolve_core_count(cores)
+  # Require the top-level runner to define the number of workers.
 
-  # cap threaded math libraries in the master R session as well
-  set_single_thread_math_env()
-  cap_threads_runtime()
+  cores <- as.integer(cores[1])
 
-  # resolve XGB tuning objects before we build the stage-1 groups
+  if (is.na(cores) || cores < 1L) {
+    stop("'cores' must be supplied by the top-level runner as a positive integer.")
+  }
+
+  # Resolve tuning objects before building the stage-1 groups.
+
   model_specs <- resolve_xgb_tuning_objects(
     model_specs = model_specs,
     N = N,
@@ -833,7 +794,6 @@ run_simulation_model_set <- function(
     base_seed = base_seed
   )
 
-  # resolve Elastic Net tuning objects before we build the stage-1 groups
   model_specs <- resolve_enet_tuning_objects(
     model_specs = model_specs,
     N = N,
@@ -847,14 +807,15 @@ run_simulation_model_set <- function(
     base_seed = base_seed
   )
 
-  # build the final shared stage-1 execution plan
+  # Build the shared stage-1 execution plan.
+
   model_specs <- assign_stage1_group_ids(model_specs)
   stage1_groups <- build_stage1_groups(model_specs)
 
-  # create deterministic replication seeds
+  # Create deterministic replication seeds.
+
   rep_seeds <- base_seed + seq_len(reps)
 
-  # run one replication
   run_one <- function(r) {
     run_one_replication_model_set(
       R = r,
@@ -873,7 +834,8 @@ run_simulation_model_set <- function(
     )
   }
 
-  # run sequentially or in parallel
+  # Run sequentially or in parallel.
+
   if (cores == 1L) {
 
     results_list <- pbapply::pblapply(
@@ -883,13 +845,14 @@ run_simulation_model_set <- function(
 
   } else {
 
-    # if available, use the exact project script set that the master session sourced
     script_dir_local <- NULL
+
     if (exists("script_dir", inherits = TRUE)) {
       script_dir_local <- get("script_dir", inherits = TRUE)
     }
 
     script_files_local <- NULL
+
     if (exists("simulation_worker_script_files", inherits = TRUE)) {
       script_files_local <- get("simulation_worker_script_files", inherits = TRUE)
     } else if (exists("simulation_script_files", inherits = TRUE)) {
@@ -902,6 +865,7 @@ run_simulation_model_set <- function(
       script_files = script_files_local,
       helper_env = environment(run_simulation_model_set)
     )
+
     on.exit(parallel::stopCluster(cl), add = TRUE)
 
     export_run_context_to_cluster(
@@ -927,10 +891,9 @@ run_simulation_model_set <- function(
     )
   }
 
-  # stack all replication outputs
-  results <- do.call(rbind, results_list)
+  # Stack all replication outputs and split them by model name.
 
-  # also return one data frame per originally requested model
+  results <- do.call(rbind, results_list)
   results_by_model <- split_results_by_model_name(results, model_specs)
 
   list(
@@ -956,9 +919,10 @@ run_simulation_model_set <- function(
 }
 
 
+# ---- single-model wrapper -----------------------------------------------------------------------
 
+# Run a single model through the shared model-set engine.
 
-# convenience wrapper for running a single model through the shared model-set engine
 run_simulation_study <- function(
     reps,
     N,
@@ -989,11 +953,13 @@ run_simulation_study <- function(
     residualizer_args = list()
 ) {
 
-  # match choices
+  # Match the requested model choices.
+
   residualizer <- match.arg(residualizer)
   sem_model <- match.arg(sem_model)
 
-  # create one model specification and hand it to the shared engine
+  # Create one model specification and run it through the shared engine.
+
   spec <- make_model_spec(
     name = "model_1",
     residualizer = residualizer,
