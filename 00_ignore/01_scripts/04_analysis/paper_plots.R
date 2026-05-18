@@ -14,9 +14,8 @@ library(knitr)
 # ============================================================
 
 dat_all <- readRDS(
-  here("02_data", "02_server_runs", "07_run", "reduced_all_conditions_combined.rds")
+  here("00_ignore","02_data", "02_server_runs", "08_run", "reduced_all_conditions_combined.rds")
 )
-
 
 # ============================================================
 # scenario lists from combined dataframe
