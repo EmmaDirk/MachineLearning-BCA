@@ -30,8 +30,12 @@ This repository has the following structure. The `00_ignore` folder contains uno
 │   ├── 01_thesis_results
 │   └── 02_additional_results
 ├── 03_output
+├── renv
+│   └── activate.R
+├── .Rprofile
 ├── LICENSE
-└── README.md
+├── README.md
+└── renv.lock
 ```
 
 ### `01_scripts`
