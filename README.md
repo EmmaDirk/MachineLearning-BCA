@@ -34,14 +34,46 @@ This repository has the following structure. The `00_ignore` folder contains uno
 └── README.md
 ```
 
-### 01_scripts
+### `01_scripts`
+
+This folder contains the scripts to generate the simulation results and to analyse these results. It is divided into two subfolders.  
+
+#### `01_data_generation` 
+
+This folder contains the scripts used to run the simulation study. All scripts are called from `12_simulation_runner.R`. The setup generates data under different simulation scenarios and efficiently applies a range of models to the generated data. The current version of `12_simulation_runner.R` is configured to reproduce the results presented in the thesis. For a more detailed explanation of the simulation scripts and their functionality, see the README included in this folder.
+
+#### `02_plots_tables`
+
+This folder is divided in two subfolders. `01_thesis_results`  contains the scripts that can be used to produce the output figures and tables for the thesis project. `02_additional_results` contains functions that can be used to explore any dataframe produced by the simulation runner. For further details, see the README included in this folder. 
 
 ### 02_data
 
+This folder is again divided in two subfolders. `01_thesis_results` contains the ouput data from running the setup in `01_data_generation`, which is supplied here since the simulation study is computationally expensive. `02_additional_results` contains the output data from other specifications of the simulation runner. We refer the interested user to the included README included in this folder. 
+
 ### 03_output
+
+This folder contains the four output plots and improper solutions table from the thesis. These are the results of requentially running the simulation study and plotting + tables scripts. 
 
 
 ## Reproducing Results
+
+### Prerequisites
+
+To reproduce the analyses, the following is needed.
+
+* R (>4.5.2)
+* The `renv` package (1.2.3)
+
+> **Hardware note**
+>
+> The full simulation study was run on a high-performance machine with the following specifications:
+>
+> - CPU: 112 × Intel(R) Xeon(R) Platinum 8580
+> - Threads: 224
+> - Memory: 851 GB RAM
+>
+> These resources were used to generate the simulation results efficiently. Creating plots from simulation results can be done on any modern pc or laptop. 
+
 
 
 ## Ethics and Privacy
