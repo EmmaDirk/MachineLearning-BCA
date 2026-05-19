@@ -224,6 +224,6 @@ The current runner fits nine models in every scenario:
 8. RI-CLPM after XGB residualisation;
 9. DPM after XGB residualisation.
 
-To add models, edit `make_model_set()` and add further `make_model_spec()` entries. The most important fields to change are usually `name`, `sem_model`, `residualizer`, `sem_c_order`, `sem_exclude`, `residualizer_c_order`, and `residualizer_exclude`.
+Models 1, 3, 6, and 9 are dropped from the output figures and tables. To add models, edit `make_model_set()` and add further `make_model_spec()` entries. The most important fields to change are usually `name`, `sem_model`, `residualizer`, `sem_c_order`, `sem_exclude`, `residualizer_c_order`, and `residualizer_exclude`.
 
 
