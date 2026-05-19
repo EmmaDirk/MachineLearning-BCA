@@ -115,7 +115,7 @@ sim_filter_results <- function(
     }
 
     df <- df %>%
-      dplyr::filter(.data$scenario_id %in% scenario_id)
+      dplyr::filter(.data$scenario_id %in% .env$scenario_id)
   }
 
   if (!is.null(N)) {
@@ -124,7 +124,7 @@ sim_filter_results <- function(
     }
 
     df <- df %>%
-      dplyr::filter(.data$N %in% N)
+      dplyr::filter(.data$N %in% .env$N)
   }
 
   if (!is.null(occasions)) {
@@ -133,7 +133,7 @@ sim_filter_results <- function(
     }
 
     df <- df %>%
-      dplyr::filter(.data$T %in% occasions)
+      dplyr::filter(.data$T %in% .env$occasions)
   }
 
   if (!is.null(keep_model_names)) {
@@ -142,7 +142,7 @@ sim_filter_results <- function(
     }
 
     df <- df %>%
-      dplyr::filter(.data$model_name %in% keep_model_names)
+      dplyr::filter(.data$model_name %in% .env$keep_model_names)
   }
 
   if (!is.null(keep_families)) {
@@ -158,7 +158,7 @@ sim_filter_results <- function(
     )
 
     df <- df %>%
-      dplyr::filter(.data$model %in% wanted_codes)
+      dplyr::filter(.data$model %in% .env$wanted_codes)
   }
 
   df
@@ -684,7 +684,7 @@ make_analysis_long <- function(
     true_col_map = default_true_col_map
 ) {
   if (is.null(names(effect_map))) {
-    stop("effect_map must be a named character vector, for example c(ARX = 'ARX', CXY = 'CXY').")
+    stop("effect_map must be a named object, for example c(ARX = 'ARX', CXY = 'CXY').")
   }
 
   missing_effects <- setdiff(effects, names(effect_map))
@@ -696,26 +696,79 @@ make_analysis_long <- function(
     )
   }
 
-  pieces <- lapply(effects, function(effect_name) {
-    estimate_col <- unname(effect_map[effect_name])
-    se_col <- paste0("se_", estimate_col)
-    true_col <- unname(true_col_map[estimate_col])
+  get_one_mapping <- function(effect_name, map, map_name) {
+    value <- map[[effect_name]]
 
-    if (!estimate_col %in% names(df)) {
+    value <- unlist(value, recursive = TRUE, use.names = FALSE)
+    value <- as.character(value)
+    value <- value[!is.na(value) & value != ""]
+
+    if (length(value) == 0) {
+      stop(
+        "Effect ", effect_name,
+        " has no usable entry in ", map_name, "."
+      )
+    }
+
+    if (length(value) > 1) {
+      warning(
+        "Effect ", effect_name,
+        " maps to multiple columns in ", map_name,
+        ": ",
+        paste(value, collapse = ", "),
+        ". Using the first one: ",
+        value[1],
+        call. = FALSE
+      )
+    }
+
+    value[1]
+  }
+
+  get_column_or_na <- function(data, column_name) {
+    column_name <- as.character(column_name)
+
+    if (length(column_name) != 1L || is.na(column_name) || column_name == "") {
+      return(rep(NA_real_, nrow(data)))
+    }
+
+    column_index <- match(column_name, names(data))
+
+    if (is.na(column_index)) {
+      return(rep(NA_real_, nrow(data)))
+    }
+
+    data[[column_index]]
+  }
+
+  pieces <- lapply(effects, function(effect_name) {
+    estimate_col <- get_one_mapping(
+      effect_name = effect_name,
+      map = effect_map,
+      map_name = "effect_map"
+    )
+
+    estimate_index <- match(estimate_col, names(df))
+
+    if (is.na(estimate_index)) {
       return(NULL)
     }
 
-    se_value <- if (se_col %in% names(df)) {
-      df[[se_col]]
+    se_col <- paste0("se_", estimate_col)
+
+    true_col <- if (estimate_col %in% names(true_col_map)) {
+      get_one_mapping(
+        effect_name = estimate_col,
+        map = true_col_map,
+        map_name = "true_col_map"
+      )
     } else {
-      rep(NA_real_, nrow(df))
+      NA_character_
     }
 
-    true_value <- if (!is.na(true_col) && true_col %in% names(df)) {
-      df[[true_col]]
-    } else {
-      rep(NA_real_, nrow(df))
-    }
+    estimate_value <- df[[estimate_index]]
+    se_value <- get_column_or_na(df, se_col)
+    true_value <- get_column_or_na(df, true_col)
 
     tibble::tibble(
       scenario_id = df$scenario_id,
@@ -736,7 +789,7 @@ make_analysis_long <- function(
       family = df$family,
       estimand = effect_name,
       estimate_col = estimate_col,
-      estimate = df[[estimate_col]],
+      estimate = estimate_value,
       se_estimate = se_value,
       true = true_value
     )

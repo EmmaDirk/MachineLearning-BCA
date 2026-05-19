@@ -78,10 +78,37 @@ To reproduce the analyses, the following is needed.
 >
 > These resources were used to generate the simulation results efficiently. Creating plots from simulation results can be done on any modern pc or laptop. 
 
+### Running the Simulation Study
 
+1. Open the project folder. 
+2. Install the required packages by running the following command in the R console. This also includes packages to create plots and tables later. 
+
+```
+renv::restore()
+```
+
+3. Open the R script `01_scripts/01_data_generation/12_simulation_runner.R`. Set the output directory to any desired folder, and optionally choose the number of cores used by your machine (uses half of available cores by default). You can find out your numbder of available cores by running the following command:
+
+```
+parallel::detectCores(logical = TRUE) 
+```
+
+Do not use all available cores, as this might cause system instability. Please note that running this script may take multiple days on a personal computer. 
+
+### Generating Output
+
+To generate the output, either use data generated in the previous step, or: `02_data/01_thesis_results/s1234_N300_1000_2000.rds`. 
+
+1. To create the plots, open the R script `01_scripts/02_plots_tables/01_thesis_results/01_make_performance_plot.R`. Choose the output directory for the plots, and define the path to your the simulation data. By default, this is path set to the data provided with this study. 
+
+2. To create the table, open the R script `01_scripts/02_plots_tables/01_thesis_results/02_make_improper_table.R`. Choose the output directory for the plots, and define the path to your the simulation data. By default, this is path set to the data provided with this study. 
 
 ## Ethics and Privacy
 
+Ethics approval was granted by [Ethics Review Board of the Faculty of Social & Behavioural Sciences at Utrecht University](https://ferb.sites.uu.nl). The ethical approval case number is 24-0286. Because only synthetic data were used, privacy concerns do not apply to this study. 
+
 ## Licence
+This project is licensed under the GNU General Public License v3.0.
 
 ## Permissions and Access 
+This archive is publicly available on [Github](https://github.com/EmmaDirk/MachineLearning-BCA). Full responsiblity for its contents lie with Mano van Holten. In case of any questions, do not hesitate to contact me at mholten60@gmail.com. 

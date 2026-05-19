@@ -62,7 +62,9 @@ study_root <- here::here()
 # Reusable directories.
 
 script_dir <- file.path(study_root, "01_scripts", "01_data_generation")
-out_dir    <- file.path(study_root, "03_output")
+
+# Set to desired output directory. 
+out_dir    <- file.path(study_root, "02_data", "01_thesis_results")
 
 # ---- logistics -----------------------------------------------------------------------------------
 

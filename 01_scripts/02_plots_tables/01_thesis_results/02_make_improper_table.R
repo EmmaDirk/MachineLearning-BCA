@@ -57,7 +57,10 @@ scenario_map <- c(
   `1` = 1L,
   `2` = 2L,
   `3` = 3L,
-  `4` = 4L
+
+# Originally the simulation used 6 scenarios. Since scenario 4 and 6 were dropped, the scenario_id
+# for scenario 4 in the thesis is 5 in the results frame.
+  `4` = 5L
 )
 
 n_order_for_table <- c(2000, 1000, 300)

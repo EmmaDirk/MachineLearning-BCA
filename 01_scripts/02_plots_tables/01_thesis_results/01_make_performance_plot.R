@@ -50,7 +50,10 @@ combined_results_file <- file.path(
 scenario_1_id <- 1L
 scenario_2_id <- 2L
 scenario_3_id <- 3L
-scenario_4_id <- 4L
+
+# Originally the simulation used 6 scenarios. Since scenario 4 and 6 were dropped, the scenario_id
+# for scenario 4 in the thesis is 5 in the results frame.
+scenario_4_id <- 5L
 
 # Define the sample-size order used when splitting the combined results file.
 
