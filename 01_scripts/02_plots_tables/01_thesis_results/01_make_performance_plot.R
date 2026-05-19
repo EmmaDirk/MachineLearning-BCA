@@ -2,25 +2,10 @@
 #
 # This script creates the final performance plots from the combined simulation-results data frame.
 #
-# The input must be the long-format output produced by the simulation runner. It should contain one
-# row per replication, occasion, model, sample-size condition, and scenario.
+# The input is the combined output produced by the simulation runner. It contains one row per
+# replication, occasion, model, sample-size condition, and scenario.
 #
-# The script expects the combined data frame to contain:
-# - scenario identifiers and sample sizes
-# - model names and model metadata
-# - point estimates and standard errors
-# - true parameter values
-# - analysis flags
-#
-# The script does not operate on raw simulated panel data or individual fitted lavaan objects. It is
-# a post-processing script for the saved simulation-results data frame.
-#
-# At the top of the script, set:
-# - combined_results_file_name: the file name of the combined results .rds file
-# - output_dir: the existing folder where plots should be saved
-#
-
-# By default, the script creates one PNG figure per scenario listed in scenario_map.
+# The script creates one PNG figure per scenario listed in scenario_map.
 # =================================================================================================
 
 # ---- libraries ----------------------------------------------------------------------------------
@@ -33,63 +18,45 @@ library(viridis)
 
 # ---- project paths -------------------------------------------------------------------------------
 
-# Set only these two values:
-# 1. the combined-results file name
-# 2. the existing output folder
+# Define the project root.
 
-combined_results_file_name <- "all_conditions_combined.rds"
+study_root <- here::here()
 
-output_dir <- here::here("04_plots", "final_figures")
+# Define reusable directories.
 
-find_project_file <- function(file_name, search_dir = here::here()) {
-  all_files <- list.files(
-    path = search_dir,
-    recursive = TRUE,
-    full.names = TRUE
-  )
+data_dir <- file.path(
+  study_root,
+  "02_data",
+  "01_thesis_results"
+)
 
-  matches <- all_files[basename(all_files) == file_name]
+plot_dir <- file.path(
+  study_root,
+  "03_output"
+)
 
-  if (length(matches) == 0) {
-    stop("Could not find a file named: ", file_name)
-  }
+# Define input file.
 
-  if (length(matches) > 1) {
-    stop(
-      "Found more than one file named: ", file_name, "\n",
-      "Please use a more specific file name or remove duplicates.\n",
-      paste(matches, collapse = "\n")
-    )
-  }
-
-  matches
-}
-
-data_path <- find_project_file(combined_results_file_name)
-
-if (!dir.exists(output_dir)) {
-  stop("The output directory does not exist: ", output_dir)
-}
-
+combined_results_file <- file.path(
+  data_dir,
+  "s1234_N300_1000_2000.rds"
+)
 
 
 # ---- scenario and sample-size setup --------------------------------------------------------------
 
-# These are the scenario_id values used inside the combined results data frame.
-# Change only these four values if the data uses different IDs.
-#
-# Note: in the older script you pasted, paper scenario 4 corresponded to scenario_id == 5.
+# Define the scenario_id values used inside the combined results data frame.
 
 scenario_1_id <- 1L
 scenario_2_id <- 2L
 scenario_3_id <- 3L
-scenario_4_id <- 5L
+scenario_4_id <- 4L
 
-# The loading order checks that each scenario contains all required sample sizes.
+# Define the sample-size order used when splitting the combined results file.
 
 n_order_by_file <- c(2000, 1000, 300)
 
-# The plot order controls the facet columns.
+# Define the sample-size order used in the plot facets.
 
 n_order_for_plots <- c(300, 1000, 2000)
 
@@ -102,8 +69,7 @@ n_labels_for_plots <- c(
 
 # ---- plot defaults --------------------------------------------------------------------------------
 
-# These are the models shown in the final plots by default.
-# Set keep_model_names_for_plots <- NULL to keep all model names in the input data.
+# Define the models shown in the final plots.
 
 default_keep_model_names <- c(
   "clpm_linear_confounders",
@@ -113,7 +79,7 @@ default_keep_model_names <- c(
   "riclpm_xgb_residualized"
 )
 
-# This order controls the legend and color order.
+# Define the legend and color order.
 
 default_method_order <- c(
   "CLPM adj",
@@ -126,7 +92,7 @@ default_method_order <- c(
 keep_model_names_for_plots <- default_keep_model_names
 method_order_for_plots <- default_method_order
 
-# These settings define the performance plot content.
+# Define the performance plot content.
 
 effects_for_plots <- c("ARXY")
 occasions_for_plots <- 2:5
@@ -141,11 +107,7 @@ plot_dpi <- 300
 
 # ---- load combined data --------------------------------------------------------------------------
 
-if (!file.exists(data_path)) {
-  stop("The combined results file does not exist: ", data_path)
-}
-
-dat_all <- readRDS(data_path)
+dat_all <- readRDS(combined_results_file)
 
 
 # ---- scenario lists ------------------------------------------------------------------------------
@@ -186,8 +148,7 @@ make_scenario_list_from_combined <- function(
   )
 }
 
-# Keep these as separate named objects.
-# This is easier to debug than a hidden map/list workflow.
+# Create separate scenario objects.
 
 dat_s1 <- make_scenario_list_from_combined(
   dat_all = dat_all,
@@ -293,8 +254,7 @@ true_col_map <- c(
 
 # ---- fit-flag handling ---------------------------------------------------------------------------
 
-# Include all converged models: normal convergence, mild improper, and severe improper.
-# Exclude only flag 1, which denotes failed or non-converged runs.
+# Include normal convergence, mild improper solutions, and severe improper solutions.
 
 included_analysis_flags <- c(0L, 2L, 3L)
 
@@ -416,6 +376,7 @@ prepare_performance_data <- function(
   }
 
   missing_effects <- setdiff(effects_needed, names(effect_map))
+
   if (length(missing_effects) > 0) {
     stop(
       "These effects are not present in effect_map: ",
@@ -427,6 +388,7 @@ prepare_performance_data <- function(
   se_cols <- paste0("se_", estimate_cols)
 
   missing_true_map <- setdiff(estimate_cols, names(true_col_map))
+
   if (length(missing_true_map) > 0) {
     stop(
       "These estimate columns are not present in true_col_map: ",
@@ -450,6 +412,7 @@ prepare_performance_data <- function(
   ))
 
   missing_cols <- setdiff(required_cols, names(df))
+
   if (length(missing_cols) > 0) {
     stop(
       "Missing required columns: ",
@@ -1125,12 +1088,7 @@ plot_performance_effects_3x4 <- function(
 
 # ---- create plots explicitly ---------------------------------------------------------------------
 
-# These four objects contain the full plotting output for each scenario.
-# Useful debugging objects:
-# - perf_s1$raw_df
-# - perf_s1$metric_df
-# - perf_s1$analysis_long
-# - perf_s1$model_overview
+# Create the full plotting output for each scenario.
 
 perf_s1 <- plot_performance_effects_3x4(
   dat_list = dat_s1,
@@ -1193,7 +1151,7 @@ perf_s4 <- plot_performance_effects_3x4(
 )
 
 
-# ---- extract plots --------------------------------------------------------------------
+# ---- extract plots -------------------------------------------------------------------------------
 
 plot_s1 <- perf_s1$plots[[effects_for_plots[1]]]
 plot_s2 <- perf_s2$plots[[effects_for_plots[1]]]
@@ -1201,10 +1159,10 @@ plot_s3 <- perf_s3$plots[[effects_for_plots[1]]]
 plot_s4 <- perf_s4$plots[[effects_for_plots[1]]]
 
 
-# ---- save plots -----------------------------------------------------------------------
+# ---- save plots ----------------------------------------------------------------------------------
 
 ggplot2::ggsave(
-  filename = file.path(output_dir, "scenario_1.png"),
+  filename = file.path(plot_dir, "scenario_1.png"),
   plot = plot_s1,
   width = plot_width,
   height = plot_height,
@@ -1214,7 +1172,7 @@ ggplot2::ggsave(
 )
 
 ggplot2::ggsave(
-  filename = file.path(output_dir, "scenario_2.png"),
+  filename = file.path(plot_dir, "scenario_2.png"),
   plot = plot_s2,
   width = plot_width,
   height = plot_height,
@@ -1224,7 +1182,7 @@ ggplot2::ggsave(
 )
 
 ggplot2::ggsave(
-  filename = file.path(output_dir, "scenario_3.png"),
+  filename = file.path(plot_dir, "scenario_3.png"),
   plot = plot_s3,
   width = plot_width,
   height = plot_height,
@@ -1234,7 +1192,7 @@ ggplot2::ggsave(
 )
 
 ggplot2::ggsave(
-  filename = file.path(output_dir, "scenario_4.png"),
+  filename = file.path(plot_dir, "scenario_4.png"),
   plot = plot_s4,
   width = plot_width,
   height = plot_height,

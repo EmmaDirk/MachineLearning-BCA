@@ -1,20 +1,13 @@
 # =================================================================================================
-# 
+#
 # This script creates the final LaTeX table of improper-solution proportions from the combined
 # simulation-results data frame.
 #
-# The input must be the long-format output produced by the simulation runner. It should contain one
-# row per replication, occasion, model, sample-size condition, and scenario.
+# The input is the combined output produced by the simulation runner. It contains one row per
+# replication, occasion, model, sample-size condition, and scenario.
 #
 # The table reports, for each selected scenario, sample size, and method, the fraction of replications
 # whose main model fit was classified as mildly or severely improper.
-#
-# At the top of the script, set:
-# - combined_results_file_name: the file name of the combined results .rds file
-# - output_dir: the existing folder where the table should be saved
-#
-
-# By default, the script writes one file named improper_fit_proportions.tex.
 # =================================================================================================
 
 # ---- libraries ----------------------------------------------------------------------------------
@@ -25,43 +18,34 @@ library(tidyverse)
 
 # ---- project paths -------------------------------------------------------------------------------
 
-# Set only these two values:
-# 1. the combined-results file name
-# 2. the existing output folder
+# Define the project root.
 
-combined_results_file_name <- "all_conditions_combined.rds"
+study_root <- here::here()
 
-output_dir <- here::here("04_plots", "final_figures")
+# Define reusable directories.
 
-find_project_file <- function(file_name, search_dir = here::here()) {
-  all_files <- list.files(
-    path = search_dir,
-    recursive = TRUE,
-    full.names = TRUE
-  )
+data_dir <- file.path(
+  study_root,
+  "02_data",
+  "01_thesis_results"
+)
 
-  matches <- all_files[basename(all_files) == file_name]
+table_dir <- file.path(
+  study_root,
+  "03_output"
+)
 
-  if (length(matches) == 0) {
-    stop("Could not find a file named: ", file_name)
-  }
+# Define input and output files.
 
-  if (length(matches) > 1) {
-    stop(
-      "Found more than one file named: ", file_name, "\n",
-      "Please use a more specific file name or remove duplicates.\n",
-      paste(matches, collapse = "\n")
-    )
-  }
+combined_results_file <- file.path(
+  data_dir,
+  "s1234_N300_1000_2000.rds"
+)
 
-  matches
-}
-
-data_path <- find_project_file(combined_results_file_name)
-
-if (!dir.exists(output_dir)) {
-  stop("The output directory does not exist: ", output_dir)
-}
+latex_file <- file.path(
+  table_dir,
+  "improper_fit_proportions.tex"
+)
 
 
 # ---- scenario and sample-size setup --------------------------------------------------------------
@@ -81,8 +65,7 @@ n_order_for_table <- c(2000, 1000, 300)
 
 # ---- table defaults ------------------------------------------------------------------------------
 
-# These are the models shown in the final table by default.
-# Set keep_model_names_for_table <- NULL to keep all model names in the input data.
+# These are the models shown in the final table.
 
 default_keep_model_names <- c(
   "clpm_linear_confounders",
@@ -107,16 +90,11 @@ method_order_for_table <- default_method_order
 
 latex_caption <- "Fraction of Improper Solutions by Sample Size, Method, and Scenario"
 latex_label <- "tab:improper-all-scenarios"
-latex_file_name <- "improper_fit_proportions.tex"
 
 
 # ---- load combined data --------------------------------------------------------------------------
 
-if (!file.exists(data_path)) {
-  stop("The combined results file does not exist: ", data_path)
-}
-
-dat_all <- readRDS(data_path)
+dat_all <- readRDS(combined_results_file)
 
 
 # ---- scenario lists ------------------------------------------------------------------------------
@@ -186,6 +164,7 @@ int_or_na <- function(x) {
 
 safe_max_flag <- function(x) {
   x <- suppressWarnings(as.numeric(as.character(x)))
+
   if (all(is.na(x))) {
     NA_real_
   } else {
@@ -330,6 +309,7 @@ prepare_table_data <- function(
   )
 
   missing_cols <- setdiff(required_cols, names(df))
+
   if (length(missing_cols) > 0) {
     stop(
       "Missing required columns: ",
@@ -457,6 +437,7 @@ make_latex_improper_table_all_scenarios <- function(
     )
 
   missing_methods <- setdiff(method_cols, names(wide_df))
+
   if (length(missing_methods) > 0) {
     wide_df[missing_methods] <- NA_real_
   }
@@ -548,5 +529,5 @@ latex_table_all_scenarios <- make_latex_improper_table_all_scenarios(
 
 writeLines(
   latex_table_all_scenarios,
-  con = file.path(output_dir, latex_file_name)
+  con = latex_file
 )

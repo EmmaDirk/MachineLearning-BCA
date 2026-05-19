@@ -57,11 +57,11 @@ library(here)
 # Set the root folder for this simulation study.
 # Replace the text inside here::here() with the relative path to the study folder.
 
-study_root <- here::here("[put your study root folder here]")
+study_root <- here::here()
 
 # Reusable directories.
 
-script_dir <- file.path(study_root, "01_data_generation")
+script_dir <- file.path(study_root, "01_scripts", "01_data_generation")
 out_dir    <- file.path(study_root, "03_output")
 
 # ---- logistics -----------------------------------------------------------------------------------
