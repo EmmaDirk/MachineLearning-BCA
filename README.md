@@ -17,6 +17,23 @@ All scenarios are evaluated at sample sizes of 300, 1000, and 2000.
 
 ## Contents 
 
+This repository has the following structure. The `00_ignore` folder contains unordered project files, and may be ignored. 
+
+```text
+.
+├── 01_scripts
+│   ├── 01_data_generation
+│   └── 02_plots_tables
+│       ├── 01_thesis_results
+│       └── 02_additional_results
+├── 02_data
+│   ├── 01_thesis_results
+│   └── 02_additional_results
+├── 03_output
+├── LICENSE
+└── README.md
+```
+
 ### 01_scripts
 
 ### 02_data
