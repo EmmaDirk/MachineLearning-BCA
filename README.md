@@ -44,19 +44,19 @@ This folder contains the scripts to generate the simulation results and to analy
 
 #### `01_data_generation` 
 
-This folder contains the scripts used to run the simulation study. All scripts are called from `12_simulation_runner.R`. The setup generates data under different simulation scenarios and efficiently applies a range of models to the generated data. The current version of `12_simulation_runner.R` is configured to reproduce the results presented in the thesis. For a more detailed explanation of the simulation scripts and their functionality, see the README included in this folder.
+This folder contains the scripts used to run the simulation study. All scripts are called from `12_simulation_runner.R`. The setup generates data under different simulation scenarios and efficiently applies a range of models to the generated data. The current version of `12_simulation_runner.R` is configured to reproduce the results presented in the thesis. For a more detailed explanation of the simulation scripts and their functionality, see the [README](01_scripts/01_data_generation/README.md).
 
 #### `02_plots_tables`
 
-This folder is divided in two subfolders. `01_thesis_results`  contains the scripts that can be used to produce the output figures and tables for the thesis project. `02_additional_results` contains functions that can be used to explore any dataframe produced by the simulation runner. For further details, see the README included in this folder. 
+This folder is divided in two subfolders. `01_thesis_results`  contains the scripts that can be used to produce the output figures and tables for the thesis project. `02_additional_results` contains functions that can be used to explore any dataframe produced by the simulation runner. For further details, see the [README](01_scripts/02_plots_tables/02_additional_results/README.md).
 
 ### 02_data
 
-This folder is again divided in two subfolders. `01_thesis_results` contains the ouput data from running the setup in `01_data_generation`, which is supplied here since the simulation study is computationally expensive. `02_additional_results` contains the output data from other specifications of the simulation runner. We refer the interested user to the included README included in this folder. 
+This folder is again divided in two subfolders. `01_thesis_results` contains the ouput data from running the setup in `01_data_generation`, which is supplied here since the simulation study is computationally expensive. `02_additional_results` contains the output data from other specifications of the simulation runner. We refer the interested user to the included [README](02_data/02_additional_results/README.md).
 
 ### 03_output
 
-This folder contains the four output plots and improper solutions table from the thesis. These are the results of requentially running the simulation study and plotting + tables scripts. 
+This folder contains the four output plots and improper solutions table from the thesis. These are the results of requentially running the simulation study and plotting and tables scripts. 
 
 
 ## Reproducing Results
