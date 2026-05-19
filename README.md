@@ -68,6 +68,8 @@ To reproduce the analyses, the following is needed.
 * R (>4.5.2)
 * The `renv` package (1.2.3)
 
+A full list of all R packages and dependencies used in the project can de found in the [renv.lock](renv.lock) file.
+
 > **Hardware note**
 >
 > The full simulation study was run on a high-performance machine with the following specifications:
@@ -111,4 +113,4 @@ Ethics approval was granted by [Ethics Review Board of the Faculty of Social & B
 This project is licensed under the GNU General Public License v3.0.
 
 ## Permissions and Access 
-This archive is publicly available on [Github](https://github.com/EmmaDirk/MachineLearning-BCA). Full responsiblity for its contents lie with Mano van Holten. In case of any questions, do not hesitate to contact me at mholten60@gmail.com. 
+This archive will be available on [Github](https://github.com/EmmaDirk/MachineLearning-BCA) for at least 3 months (end data: 19/08/2026). Full responsiblity for its contents lie with Mano van Holten. In case of any questions, do not hesitate to contact me at mholten60@gmail.com. 
